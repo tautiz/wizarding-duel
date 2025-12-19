@@ -21,6 +21,7 @@ const App: React.FC = () => {
   const [statusMessage, setStatusMessage] = useState<string>("Pasiruoškite dvikovai!");
   const [handLandmarks, setHandLandmarks] = useState<any[][]>([]);
   const [cursorPos, setCursorPos] = useState({ x: 0.5, y: 0.5 });
+  const [cursorGamePos, setCursorGamePos] = useState({ x: 0.5, y: 0.5 });
   const [isPinching, setIsPinching] = useState(false);
   const [magicIntensity, setMagicIntensity] = useState(0);
   const [isLevelSuccess, setIsLevelSuccess] = useState(false);
@@ -28,6 +29,7 @@ const App: React.FC = () => {
   const [debugMode, setDebugMode] = useState(false);
   const [debugLastDistance, setDebugLastDistance] = useState<number | null>(null);
   const [debugPaused, setDebugPaused] = useState(false);
+  const [debugShowHand, setDebugShowHand] = useState(false);
   const [debugSpellId, setDebugSpellId] = useState<string>(SPELLS[0].id);
   const [debugLevelInput, setDebugLevelInput] = useState<string>('1');
 
@@ -44,6 +46,7 @@ const App: React.FC = () => {
   const spellQueueRef = useRef<EnhancedSpell[]>(spellQueue);
   
   const videoRef = useRef<HTMLVideoElement>(null);
+  const gameAreaRef = useRef<HTMLDivElement>(null);
   const handsRef = useRef<any>(null);
   const animationFrameRef = useRef<number | null>(null);
   const audioRefs = useRef<Record<string, HTMLAudioElement>>({});
@@ -143,9 +146,47 @@ const App: React.FC = () => {
       const indexTip = landmarks[8];
       const thumbTip = landmarks[4];
 
-      const x = 1 - indexTip.x;
-      const y = indexTip.y;
-      setCursorPos({ x, y });
+      const rawX = indexTip.x;
+      const rawY = indexTip.y;
+      const mirroredX = 1 - rawX;
+
+      const videoEl = videoRef.current;
+      let screenX = mirroredX * window.innerWidth;
+      let screenY = rawY * window.innerHeight;
+
+      if (videoEl) {
+        const rect = videoEl.getBoundingClientRect();
+        const containerW = rect.width;
+        const containerH = rect.height;
+
+        const intrinsicW = videoEl.videoWidth || containerW;
+        const intrinsicH = videoEl.videoHeight || containerH;
+
+        const scale = Math.max(containerW / intrinsicW, containerH / intrinsicH);
+        const drawnW = intrinsicW * scale;
+        const drawnH = intrinsicH * scale;
+        const offsetX = (containerW - drawnW) / 2;
+        const offsetY = (containerH - drawnH) / 2;
+
+        screenX = rect.left + (mirroredX * drawnW) + offsetX;
+        screenY = rect.top + (rawY * drawnH) + offsetY;
+      }
+
+      const normScreenX = Math.max(0, Math.min(1, screenX / window.innerWidth));
+      const normScreenY = Math.max(0, Math.min(1, screenY / window.innerHeight));
+      setCursorPos({ x: normScreenX, y: normScreenY });
+
+      let gameX = 0.5;
+      let gameY = 0.5;
+      const gameEl = gameAreaRef.current;
+      if (gameEl) {
+        const r = gameEl.getBoundingClientRect();
+        gameX = (screenX - r.left) / r.width;
+        gameY = (screenY - r.top) / r.height;
+        gameX = Math.max(0, Math.min(1, gameX));
+        gameY = Math.max(0, Math.min(1, gameY));
+      }
+      setCursorGamePos({ x: gameX, y: gameY });
 
       const dist = Math.sqrt(Math.pow(thumbTip.x - indexTip.x, 2) + Math.pow(thumbTip.y - indexTip.y, 2));
       const pinching = dist < 0.08;
@@ -158,9 +199,11 @@ const App: React.FC = () => {
         
         const currentWp = spell.waypoints[pathProgressRef.current];
         if (currentWp) {
-          const hX = indexTip.x * 100;
-          const hY = indexTip.y * 100;
-          const d = Math.sqrt(Math.pow(hX - currentWp.x, 2) + Math.pow(hY - currentWp.y, 2));
+          const hX = gameX * 100;
+          const hY = gameY * 100;
+          const wpX = 100 - currentWp.x;
+          const wpY = currentWp.y;
+          const d = Math.sqrt(Math.pow(hX - wpX, 2) + Math.pow(hY - wpY, 2));
           const tolerance = getToleranceForDifficulty(configRef.current.difficulty);
 
           setDebugLastDistance(d);
@@ -195,8 +238,8 @@ const App: React.FC = () => {
       // INTERACTION logic (Pinch to click)
       if (pinching && !(window as any)._isPunched) {
         (window as any)._isPunched = true;
-        const cx = x * window.innerWidth;
-        const cy = y * window.innerHeight;
+        const cx = screenX;
+        const cy = screenY;
 
         if (isLevelSuccessRef.current && nextButtonRef.current) {
           const r = nextButtonRef.current.getBoundingClientRect();
@@ -347,7 +390,7 @@ const App: React.FC = () => {
       <WandCursor x={cursorPos.x} y={cursorPos.y} isPinching={isPinching} />
 
       {debugMode && (
-        <div className="fixed bottom-6 left-6 z-[9998] pointer-events-auto cursor-auto select-text">
+        <div className="fixed bottom-6 left-6 z-[9998] pointer-events-auto select-text">
           <div className="bg-black/70 backdrop-blur-md border border-white/10 rounded-3xl p-4 text-white w-[360px]">
             <div className="flex items-center justify-between mb-3">
               <div className="font-mono font-bold text-amber-200">DEBUG CONTROLS</div>
@@ -358,6 +401,13 @@ const App: React.FC = () => {
                 {debugPaused ? 'Resume' : 'Pause'}
               </button>
             </div>
+
+            <button
+              onClick={() => setDebugShowHand(v => !v)}
+              className="w-full mb-3 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 text-sm font-bold"
+            >
+              Hand overlay: {debugShowHand ? 'ON' : 'OFF'}
+            </button>
 
             <div className="grid grid-cols-2 gap-2 mb-3">
               <button onClick={() => setTimeLeft(t => Math.max(0, t - 5))} className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 text-sm font-bold">-5s</button>
@@ -469,11 +519,13 @@ const App: React.FC = () => {
           </div>
 
           <div className="relative w-full max-w-6xl aspect-video rounded-[4rem] border-[16px] border-[#2c1e14] shadow-[0_0_50px_rgba(0,0,0,0.8)] overflow-hidden bg-black/40">
+            <div ref={gameAreaRef} className="absolute inset-0" />
             <TrackingOverlay
               landmarks={handLandmarks}
               targetSpell={isLevelSuccess ? undefined : activeSpell}
               difficulty={config.difficulty}
               debug={debugMode}
+              debugShowHand={debugShowHand}
               debugInfo={{
                 gameState,
                 level: currentLevel,
@@ -484,7 +536,7 @@ const App: React.FC = () => {
                 queueLength: spellQueue.length,
                 timeLeft,
                 tolerance,
-                cursorPos,
+                cursorPos: cursorGamePos,
                 isPinching,
                 lastDistance: debugLastDistance
               }}

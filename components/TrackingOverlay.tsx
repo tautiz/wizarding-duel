@@ -8,6 +8,7 @@ interface TrackingOverlayProps {
   targetSpell?: EnhancedSpell;
   difficulty: 'easy' | 'medium' | 'hard';
   debug?: boolean;
+  debugShowHand?: boolean;
   debugInfo?: {
     gameState: string;
     level: number;
@@ -24,15 +25,15 @@ interface TrackingOverlayProps {
   };
 }
 
-export const TrackingOverlay: React.FC<TrackingOverlayProps> = ({ landmarks, targetSpell, difficulty, debug = false, debugInfo }) => {
+export const TrackingOverlay: React.FC<TrackingOverlayProps> = ({ landmarks, targetSpell, difficulty, debug = false, debugShowHand = false, debugInfo }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const trailRef = useRef<{x: number, y: number, life: number}[]>([]);
-  const stateRef = useRef({ landmarks, targetSpell, difficulty, debug, debugInfo });
+  const stateRef = useRef({ landmarks, targetSpell, difficulty, debug, debugShowHand, debugInfo });
 
   // Update logic Ref to keep animation loop clean
   useEffect(() => {
-    stateRef.current = { landmarks, targetSpell, difficulty, debug, debugInfo };
-  }, [landmarks, targetSpell, difficulty, debug, debugInfo]);
+    stateRef.current = { landmarks, targetSpell, difficulty, debug, debugShowHand, debugInfo };
+  }, [landmarks, targetSpell, difficulty, debug, debugShowHand, debugInfo]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -41,7 +42,7 @@ export const TrackingOverlay: React.FC<TrackingOverlayProps> = ({ landmarks, tar
     if (!ctx) return;
 
     const render = () => {
-      const { landmarks, targetSpell, difficulty, debug, debugInfo } = stateRef.current;
+      const { landmarks, targetSpell, difficulty, debug, debugShowHand, debugInfo } = stateRef.current;
       const tolerance = getToleranceForDifficulty(difficulty);
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -79,49 +80,51 @@ export const TrackingOverlay: React.FC<TrackingOverlayProps> = ({ landmarks, tar
       }
 
       // Trail update
-      trailRef.current = trailRef.current
-        .map(p => ({ ...p, life: p.life - 0.03 }))
-        .filter(p => p.life > 0);
+      if (debug && debugShowHand) {
+        trailRef.current = trailRef.current
+          .map(p => ({ ...p, life: p.life - 0.03 }))
+          .filter(p => p.life > 0);
 
-      trailRef.current.forEach((p) => {
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, 6 * p.life, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(255, 255, 255, ${p.life})`;
-        ctx.shadowBlur = 10;
-        ctx.shadowColor = targetSpell?.color || 'white';
-        ctx.fill();
-      });
-
-      // Hand visuals
-      if (landmarks && landmarks.length > 0) {
-        const win = window as any;
-        const drawConnectors = win.drawConnectors;
-        const HAND_CONNECTIONS = win.HAND_CONNECTIONS;
-
-        landmarks.forEach((hand) => {
-          const indexTip = hand[8];
-          if (indexTip) {
-            trailRef.current.push({
-              x: indexTip.x * canvas.width,
-              y: indexTip.y * canvas.height,
-              life: 1.0
-            });
-
-            ctx.beginPath();
-            ctx.arc(indexTip.x * canvas.width, indexTip.y * canvas.height, 10, 0, Math.PI * 2);
-            ctx.fillStyle = 'white';
-            ctx.shadowBlur = 20;
-            ctx.shadowColor = 'white';
-            ctx.fill();
-          }
-
-          if (drawConnectors && HAND_CONNECTIONS) {
-            drawConnectors(ctx, hand, HAND_CONNECTIONS, {
-              color: 'rgba(212, 175, 55, 0.15)',
-              lineWidth: 1,
-            });
-          }
+        trailRef.current.forEach((p) => {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 6 * p.life, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255, 255, 255, ${p.life})`;
+          ctx.shadowBlur = 10;
+          ctx.shadowColor = targetSpell?.color || 'white';
+          ctx.fill();
         });
+
+        // Hand visuals (debug-only)
+        if (landmarks && landmarks.length > 0) {
+          const win = window as any;
+          const drawConnectors = win.drawConnectors;
+          const HAND_CONNECTIONS = win.HAND_CONNECTIONS;
+
+          landmarks.forEach((hand) => {
+            const indexTip = hand[8];
+            if (indexTip) {
+              trailRef.current.push({
+                x: indexTip.x * canvas.width,
+                y: indexTip.y * canvas.height,
+                life: 1.0
+              });
+
+              ctx.beginPath();
+              ctx.arc(indexTip.x * canvas.width, indexTip.y * canvas.height, 10, 0, Math.PI * 2);
+              ctx.fillStyle = 'white';
+              ctx.shadowBlur = 20;
+              ctx.shadowColor = 'white';
+              ctx.fill();
+            }
+
+            if (drawConnectors && HAND_CONNECTIONS) {
+              drawConnectors(ctx, hand, HAND_CONNECTIONS, {
+                color: 'rgba(212, 175, 55, 0.15)',
+                lineWidth: 1,
+              });
+            }
+          });
+        }
       }
 
       if (debug && targetSpell) {
@@ -172,17 +175,7 @@ export const TrackingOverlay: React.FC<TrackingOverlayProps> = ({ landmarks, tar
           ctx.restore();
         });
 
-        // Cursor marker + distance
-        if (debugInfo) {
-          const cx = debugInfo.cursorPos.x * canvas.width;
-          const cy = debugInfo.cursorPos.y * canvas.height;
-          ctx.save();
-          ctx.beginPath();
-          ctx.arc(cx, cy, 6, 0, Math.PI * 2);
-          ctx.fillStyle = debugInfo.isPinching ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.6)';
-          ctx.fill();
-          ctx.restore();
-        }
+        // Intentionally no cursor marker here: WandCursor is the single on-screen cursor.
       }
 
       requestAnimationFrame(render);
