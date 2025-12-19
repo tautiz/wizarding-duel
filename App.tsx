@@ -1,13 +1,14 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
-import { GameState, Player, GameConfig, Spell, WIZARD_NAMES } from './types';
+import { GameState, Player, GameConfig, WIZARD_NAMES } from './types';
 import { SPELLS, SYSTEM_INSTRUCTION, SOUNDS, EnhancedSpell, getToleranceForDifficulty, DIFFICULTIES, DEFAULT_DIFFICULTY_ID, getDifficultyConfig } from './constants';
 import { MagicEffect } from './components/MagicEffect';
 import { SpellGuide } from './components/SpellGuide';
 import { TrackingOverlay } from './components/TrackingOverlay';
 import { WandCursor } from './components/WandCursor';
 import { encode, decode, decodeAudioData } from './services/audioUtils';
+import { createGestureDetectors } from './gestures/GestureDetectors';
 
 const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>(GameState.LANDING);
@@ -47,9 +48,9 @@ const App: React.FC = () => {
   const activeQueueIndexRef = useRef(0);
   const spellQueueRef = useRef<EnhancedSpell[]>(spellQueue);
 
-  const openPalmStableCountRef = useRef(0);
-  const openPalmWasActiveRef = useRef(false);
+  const gestureDetectorsRef = useRef(createGestureDetectors());
   const pauseToggleCooldownUntilRef = useRef(0);
+  const exitCooldownUntilRef = useRef(0);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const gameAreaRef = useRef<HTMLDivElement>(null);
@@ -57,6 +58,31 @@ const App: React.FC = () => {
   const animationFrameRef = useRef<number | null>(null);
   const audioRefs = useRef<Record<string, HTMLAudioElement>>({});
   const nextButtonRef = useRef<HTMLButtonElement>(null);
+
+  const exitToSetup = useCallback(() => {
+    setPaused(false);
+    pausedRef.current = false;
+    setDebugPaused(false);
+    setIsLevelSuccess(false);
+    isLevelSuccessRef.current = false;
+    setMagicIntensity(0);
+    setPathProgress(0);
+    pathProgressRef.current = 0;
+    setActiveQueueIndex(0);
+    activeQueueIndexRef.current = 0;
+    setSpellQueue([SPELLS[0]]);
+    spellQueueRef.current = [SPELLS[0]];
+    currentSpellRef.current = SPELLS[0];
+    setActiveEffects({ p1: false, p2: false });
+    setStatusMessage('Pasiruoškite dvikovai!');
+    setTimeLeft(getDifficultyConfig(configRef.current.difficulty).startTime);
+
+    gestureDetectorsRef.current.reset();
+    pauseToggleCooldownUntilRef.current = 0;
+    exitCooldownUntilRef.current = 0;
+
+    setGameState(GameState.SETUP);
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -76,6 +102,18 @@ const App: React.FC = () => {
       if (e.target instanceof HTMLElement) {
         const tag = e.target.tagName;
         if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      }
+
+      if (e.key === 'Escape') {
+        if (e.repeat) return;
+        if (gameStateRef.current === GameState.PLAYING || gameStateRef.current === GameState.RESULTS) {
+          e.preventDefault();
+          const now = Date.now();
+          if (now < exitCooldownUntilRef.current) return;
+          exitCooldownUntilRef.current = now + 800;
+          exitToSetup();
+        }
+        return;
       }
 
       if (e.code === 'Space') {
@@ -99,7 +137,7 @@ const App: React.FC = () => {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [exitToSetup]);
 
   useEffect(() => {
     setDebugLevelInput(String(currentLevel));
@@ -220,56 +258,25 @@ const App: React.FC = () => {
       setIsPinching(pinching);
 
       const now = Date.now();
-      if (gameStateRef.current === GameState.PLAYING) {
-        const vAngle = (ax: number, ay: number, bx: number, by: number, cx: number, cy: number) => {
-          const abx = ax - bx;
-          const aby = ay - by;
-          const cbx = cx - bx;
-          const cby = cy - by;
-          const abLen = Math.hypot(abx, aby);
-          const cbLen = Math.hypot(cbx, cby);
-          if (abLen < 1e-6 || cbLen < 1e-6) return 0;
-          const dot = abx * cbx + aby * cby;
-          const cos = Math.max(-1, Math.min(1, dot / (abLen * cbLen)));
-          return (Math.acos(cos) * 180) / Math.PI;
-        };
 
-        const fingerExtended = (mcpIdx: number, pipIdx: number, tipIdx: number) => {
-          const m = landmarks[mcpIdx];
-          const p = landmarks[pipIdx];
-          const t = landmarks[tipIdx];
-          return vAngle(m.x, m.y, p.x, p.y, t.x, t.y) > 160;
-        };
+      const gestureEvents = gestureDetectorsRef.current.update(
+        results.multiHandLandmarks,
+        gameStateRef.current === GameState.PLAYING
+      );
 
-        const indexExt = fingerExtended(5, 6, 8);
-        const middleExt = fingerExtended(9, 10, 12);
-        const ringExt = fingerExtended(13, 14, 16);
-        const pinkyExt = fingerExtended(17, 18, 20);
-
-        const thumbTip2 = landmarks[4];
-        const indexMcp = landmarks[5];
-        const thumbSpread = Math.hypot(thumbTip2.x - indexMcp.x, thumbTip2.y - indexMcp.y) > 0.10;
-
-        const openPalmCandidate = indexExt && middleExt && ringExt && pinkyExt && thumbSpread;
-
-        if (openPalmCandidate) {
-          openPalmStableCountRef.current += 1;
-        } else {
-          openPalmStableCountRef.current = 0;
+      if (gestureEvents.crossedHandsEdge) {
+        if (now >= exitCooldownUntilRef.current) {
+          exitCooldownUntilRef.current = now + 1500;
+          exitToSetup();
+          return;
         }
+      }
 
-        const openPalmActive = openPalmStableCountRef.current >= 5;
-
-        if (openPalmActive && !openPalmWasActiveRef.current) {
-          if (now >= pauseToggleCooldownUntilRef.current) {
-            pauseToggleCooldownUntilRef.current = now + 1200;
-            setPaused(p => !p);
-          }
+      if (gestureEvents.openPalmEdge) {
+        if (now >= pauseToggleCooldownUntilRef.current) {
+          pauseToggleCooldownUntilRef.current = now + 1200;
+          setPaused(p => !p);
         }
-        openPalmWasActiveRef.current = openPalmActive;
-      } else {
-        openPalmStableCountRef.current = 0;
-        openPalmWasActiveRef.current = false;
       }
 
       // GAMEPLAY logic
@@ -335,8 +342,9 @@ const App: React.FC = () => {
     } else {
       setHandLandmarks([]);
       setIsPinching(false);
+      gestureDetectorsRef.current.update(null, false);
     }
-  }, [handleLevelComplete]);
+  }, [handleLevelComplete, exitToSetup]);
 
   useEffect(() => {
     let active = true;
@@ -346,7 +354,7 @@ const App: React.FC = () => {
         locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
       });
       hands.setOptions({
-        maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5
+        maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5
       });
       hands.onResults((res: any) => { if (active) onResults(res); });
       handsRef.current = hands;
