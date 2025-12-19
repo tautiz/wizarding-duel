@@ -23,6 +23,38 @@ export const MagicEffect: React.FC<MagicEffectProps> = ({ color, side, active, s
 
   const renderEffect = () => {
     switch (spellId) {
+      case 'avada-kedavra':
+        return (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="w-full h-full bg-green-500/30 blur-3xl animate-flash" />
+            <div className="w-1 h-[200vh] bg-green-400 shadow-[0_0_50px_#2ecc71] rotate-[30deg] animate-pulse" />
+          </div>
+        );
+      case 'incendio':
+        return (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="w-64 h-64 bg-orange-600 rounded-full blur-3xl animate-bomb-blast opacity-60" />
+            <div className="flex gap-4">
+              {[1, 2, 3].map(i => (
+                <div key={i} className="w-8 h-32 bg-gradient-to-t from-red-600 to-yellow-400 rounded-full animate-bounce" style={{ animationDelay: `${i * 0.1}s` }} />
+              ))}
+            </div>
+          </div>
+        );
+      case 'aguamenti':
+        return (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="w-full h-32 bg-blue-500/40 blur-2xl animate-slice-horizontal" />
+            <div className="w-64 h-64 border-8 border-blue-200/50 rounded-full animate-ping" />
+          </div>
+        );
+      case 'expecto-patronum':
+        return (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="w-full h-full bg-white/40 blur-[100px] animate-flash" />
+            <div className="w-96 h-96 border-4 border-white/20 rounded-full animate-[spin_10s_linear_infinite] shadow-[0_0_100px_white]" />
+          </div>
+        );
       case 'bombarda':
         return (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -46,12 +78,6 @@ export const MagicEffect: React.FC<MagicEffectProps> = ({ color, side, active, s
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <div className="w-full h-full bg-white/20 blur-3xl animate-flash" />
             <div className="w-20 h-20 bg-white rounded-full shadow-[0_0_100px_white] animate-pulse" />
-          </div>
-        );
-      case 'expelliarmus':
-        return (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="h-2 w-full bg-red-600 shadow-[0_0_30px_red] animate-slice-horizontal" />
           </div>
         );
       default:
