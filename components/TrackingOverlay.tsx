@@ -6,7 +6,7 @@ import { EnhancedSpell, getToleranceForDifficulty } from '../constants';
 interface TrackingOverlayProps {
   landmarks: any[][];
   targetSpell?: EnhancedSpell;
-  difficulty: 'easy' | 'medium' | 'hard';
+  difficulty: string;
   debug?: boolean;
   debugShowHand?: boolean;
   debugInfo?: {

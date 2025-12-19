@@ -27,7 +27,7 @@ export interface Player {
 export interface GameConfig {
   voiceEnabled: boolean;
   playerCount: number;
-  difficulty: 'easy' | 'medium' | 'hard';
+  difficulty: string;
 }
 
 export const WIZARD_NAMES = [

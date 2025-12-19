@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
 import { GameState, Player, GameConfig, Spell, WIZARD_NAMES } from './types';
-import { SPELLS, SYSTEM_INSTRUCTION, SOUNDS, EnhancedSpell, getToleranceForDifficulty } from './constants';
+import { SPELLS, SYSTEM_INSTRUCTION, SOUNDS, EnhancedSpell, getToleranceForDifficulty, DIFFICULTIES, DEFAULT_DIFFICULTY_ID, getDifficultyConfig } from './constants';
 import { MagicEffect } from './components/MagicEffect';
 import { SpellGuide } from './components/SpellGuide';
 import { TrackingOverlay } from './components/TrackingOverlay';
@@ -11,7 +11,7 @@ import { encode, decode, decodeAudioData } from './services/audioUtils';
 
 const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>(GameState.LANDING);
-  const [config, setConfig] = useState<GameConfig>({ voiceEnabled: false, playerCount: 1, difficulty: 'medium' });
+  const [config, setConfig] = useState<GameConfig>({ voiceEnabled: false, playerCount: 1, difficulty: DEFAULT_DIFFICULTY_ID });
   const [players, setPlayers] = useState<Player[]>([{ id: 1, name: 'Haris', score: 0 }]);
   const [currentLevel, setCurrentLevel] = useState(1);
   const [spellQueue, setSpellQueue] = useState<EnhancedSpell[]>([SPELLS[0]]);
@@ -130,7 +130,7 @@ const App: React.FC = () => {
     setIsLevelSuccess(true);
     isLevelSuccessRef.current = true;
     
-    const mult = configRef.current.difficulty === 'easy' ? 1 : configRef.current.difficulty === 'medium' ? 1.5 : 2;
+    const mult = getDifficultyConfig(configRef.current.difficulty).scoreMultiplier;
     const comboBonus = spellQueueRef.current.length * 50;
     setPlayers(p => p.map(x => ({ ...x, score: x.score + Math.round((100 * mult) + comboBonus) })));
     setActiveEffects({ p1: true, p2: false });
@@ -298,7 +298,7 @@ const App: React.FC = () => {
   }, [onResults]);
 
   const startGame = () => {
-    const s = config.difficulty === 'easy' ? 45 : config.difficulty === 'medium' ? 30 : 20;
+    const s = getDifficultyConfig(config.difficulty).startTime;
     setPlayers([{ id: 1, name: players[0].name, score: 0 }]);
     setCurrentLevel(1);
     const initialQueue = [SPELLS[0]];
@@ -471,8 +471,8 @@ const App: React.FC = () => {
             <div className="bg-black/10 p-6 rounded-3xl border border-[#4a3728]/20">
               <h3 className="font-bold mb-4 text-xl font-serif text-[#2c1e14]">LYGIS</h3>
               <div className="flex flex-col gap-3">
-                {(['easy', 'medium', 'hard'] as const).map(d => (
-                  <button key={d} onClick={() => setConfig({...config, difficulty: d})} className={`py-3 rounded-xl font-bold border-2 transition-all ${config.difficulty === d ? 'bg-[#2c1e14] text-white border-[#d4af37]' : 'bg-white/50 text-[#2c1e14] border-transparent hover:bg-white/80'}`}>{d === 'easy' ? 'Mokinys' : d === 'medium' ? 'Burtininkas' : 'Aurotas'}</button>
+                {Object.entries(DIFFICULTIES).map(([id, cfg]) => (
+                  <button key={id} onClick={() => setConfig({...config, difficulty: id})} className={`py-3 rounded-xl font-bold border-2 transition-all ${config.difficulty === id ? 'bg-[#2c1e14] text-white border-[#d4af37]' : 'bg-white/50 text-[#2c1e14] border-transparent hover:bg-white/80'}`}>{cfg.label}</button>
                 ))}
               </div>
             </div>

@@ -6,8 +6,42 @@ export interface Waypoint {
   y: number;
 }
 
-export const getToleranceForDifficulty = (difficulty: 'easy' | 'medium' | 'hard') => {
-  return difficulty === 'easy' ? 22 : difficulty === 'medium' ? 16 : 10;
+export interface DifficultyConfig {
+  label: string;
+  tolerance: number;
+  startTime: number;
+  scoreMultiplier: number;
+}
+
+export const DEFAULT_DIFFICULTY_ID = 'medium';
+
+export const DIFFICULTIES: Record<string, DifficultyConfig> = {
+  easy: {
+    label: 'Mokinys',
+    tolerance: 11,
+    startTime: 45,
+    scoreMultiplier: 1,
+  },
+  medium: {
+    label: 'Burtininkas',
+    tolerance: 6,
+    startTime: 30,
+    scoreMultiplier: 1.5,
+  },
+  hard: {
+    label: 'Aurotas',
+    tolerance: 3,
+    startTime: 20,
+    scoreMultiplier: 2,
+  },
+};
+
+export const getDifficultyConfig = (difficultyId: string): DifficultyConfig => {
+  return DIFFICULTIES[difficultyId] ?? DIFFICULTIES[DEFAULT_DIFFICULTY_ID];
+};
+
+export const getToleranceForDifficulty = (difficultyId: string) => {
+  return getDifficultyConfig(difficultyId).tolerance;
 };
 
 export interface EnhancedSpell extends Spell {

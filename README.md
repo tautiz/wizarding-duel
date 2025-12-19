@@ -89,6 +89,36 @@ Leidžia ranka nustatyti `level`.
 - **Test spell + Apply & jump to PLAYING**
 Pasirenkate burtą iš sąrašo ir iškart peršokate į `PLAYING` su pasirinktu burtu.
 
+## ⚙️ Sunkumo lygių konfigūracija
+
+Sunkumo lygiai aprašyti vienoje vietoje: `constants.tsx` objekte `DIFFICULTIES`.
+
+Kiekvienas įrašas turi parametrus:
+
+- **label**: tekstas UI (setup lange)
+- **tolerance**: waypoint tolerancija (kiek „arti“ reikia patekti)
+- **startTime**: kiek sekundžių skiriama startuojant žaidimą
+- **scoreMultiplier**: taškų daugiklis
+
+### Kaip pridėti naują lygį
+
+1. Atidarykite `constants.tsx`.
+2. Į `DIFFICULTIES` pridėkite naują įrašą, pvz.:
+
+```ts
+export const DIFFICULTIES = {
+  ...,
+  insane: {
+    label: 'Beprotybė',
+    tolerance: 7,
+    startTime: 15,
+    scoreMultiplier: 2.5,
+  },
+};
+```
+
+UI mygtukai ir visa logika automatiškai pradės naudoti šį lygį.
+
 ## 🛠 Technologijos
 *   **React** UI logikai.
 *   **MediaPipe Hands** rankų sekimui realiu laiku.
