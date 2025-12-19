@@ -26,6 +26,7 @@ const App: React.FC = () => {
   const [magicIntensity, setMagicIntensity] = useState(0);
   const [isLevelSuccess, setIsLevelSuccess] = useState(false);
   const [pathProgress, setPathProgress] = useState(0);
+  const [paused, setPaused] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
   const [debugLastDistance, setDebugLastDistance] = useState<number | null>(null);
   const [debugPaused, setDebugPaused] = useState(false);
@@ -41,9 +42,14 @@ const App: React.FC = () => {
   const currentSpellRef = useRef<EnhancedSpell>(spellQueue[0]);
   const pathProgressRef = useRef(pathProgress);
   const isLevelSuccessRef = useRef(isLevelSuccess);
+  const pausedRef = useRef(paused);
   const configRef = useRef(config);
   const activeQueueIndexRef = useRef(0);
   const spellQueueRef = useRef<EnhancedSpell[]>(spellQueue);
+
+  const openPalmStableCountRef = useRef(0);
+  const openPalmWasActiveRef = useRef(false);
+  const pauseToggleCooldownUntilRef = useRef(0);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const gameAreaRef = useRef<HTMLDivElement>(null);
@@ -67,6 +73,22 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLElement) {
+        const tag = e.target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      }
+
+      if (e.code === 'Space') {
+        if (e.repeat) return;
+        if (gameStateRef.current !== GameState.PLAYING) return;
+        e.preventDefault();
+        const now = Date.now();
+        if (now < pauseToggleCooldownUntilRef.current) return;
+        pauseToggleCooldownUntilRef.current = now + 700;
+        setPaused(p => !p);
+        return;
+      }
+
       if (e.key === 'd' || e.key === 'D') {
         setDebugMode(prev => {
           const next = !prev;
@@ -93,10 +115,15 @@ const App: React.FC = () => {
     currentSpellRef.current = spellQueue[activeQueueIndex];
     pathProgressRef.current = pathProgress;
     isLevelSuccessRef.current = isLevelSuccess;
+    pausedRef.current = paused;
     configRef.current = config;
     activeQueueIndexRef.current = activeQueueIndex;
     spellQueueRef.current = spellQueue;
-  }, [gameState, spellQueue, activeQueueIndex, pathProgress, isLevelSuccess, config]);
+  }, [gameState, spellQueue, activeQueueIndex, pathProgress, isLevelSuccess, paused, config]);
+
+  useEffect(() => {
+    if (gameState !== GameState.PLAYING) setPaused(false);
+  }, [gameState]);
 
   // Audio Preload
   useEffect(() => {
@@ -192,8 +219,61 @@ const App: React.FC = () => {
       const pinching = dist < 0.08;
       setIsPinching(pinching);
 
+      const now = Date.now();
+      if (gameStateRef.current === GameState.PLAYING) {
+        const vAngle = (ax: number, ay: number, bx: number, by: number, cx: number, cy: number) => {
+          const abx = ax - bx;
+          const aby = ay - by;
+          const cbx = cx - bx;
+          const cby = cy - by;
+          const abLen = Math.hypot(abx, aby);
+          const cbLen = Math.hypot(cbx, cby);
+          if (abLen < 1e-6 || cbLen < 1e-6) return 0;
+          const dot = abx * cbx + aby * cby;
+          const cos = Math.max(-1, Math.min(1, dot / (abLen * cbLen)));
+          return (Math.acos(cos) * 180) / Math.PI;
+        };
+
+        const fingerExtended = (mcpIdx: number, pipIdx: number, tipIdx: number) => {
+          const m = landmarks[mcpIdx];
+          const p = landmarks[pipIdx];
+          const t = landmarks[tipIdx];
+          return vAngle(m.x, m.y, p.x, p.y, t.x, t.y) > 160;
+        };
+
+        const indexExt = fingerExtended(5, 6, 8);
+        const middleExt = fingerExtended(9, 10, 12);
+        const ringExt = fingerExtended(13, 14, 16);
+        const pinkyExt = fingerExtended(17, 18, 20);
+
+        const thumbTip2 = landmarks[4];
+        const indexMcp = landmarks[5];
+        const thumbSpread = Math.hypot(thumbTip2.x - indexMcp.x, thumbTip2.y - indexMcp.y) > 0.10;
+
+        const openPalmCandidate = indexExt && middleExt && ringExt && pinkyExt && thumbSpread;
+
+        if (openPalmCandidate) {
+          openPalmStableCountRef.current += 1;
+        } else {
+          openPalmStableCountRef.current = 0;
+        }
+
+        const openPalmActive = openPalmStableCountRef.current >= 5;
+
+        if (openPalmActive && !openPalmWasActiveRef.current) {
+          if (now >= pauseToggleCooldownUntilRef.current) {
+            pauseToggleCooldownUntilRef.current = now + 1200;
+            setPaused(p => !p);
+          }
+        }
+        openPalmWasActiveRef.current = openPalmActive;
+      } else {
+        openPalmStableCountRef.current = 0;
+        openPalmWasActiveRef.current = false;
+      }
+
       // GAMEPLAY logic
-      if (gameStateRef.current === GameState.PLAYING && !isLevelSuccessRef.current) {
+      if (gameStateRef.current === GameState.PLAYING && !isLevelSuccessRef.current && !pausedRef.current) {
         const spell = currentSpellRef.current;
         if (!spell) return;
         
@@ -236,7 +316,7 @@ const App: React.FC = () => {
       }
 
       // INTERACTION logic (Pinch to click)
-      if (pinching && !(window as any)._isPunched) {
+      if (!pausedRef.current && pinching && !(window as any)._isPunched) {
         (window as any)._isPunched = true;
         const cx = screenX;
         const cy = screenY;
@@ -332,7 +412,7 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    if (gameState === GameState.PLAYING && !isLevelSuccess && !debugPaused) {
+    if (gameState === GameState.PLAYING && !isLevelSuccess && !debugPaused && !paused) {
       const timer = setInterval(() => {
         setTimeLeft(t => {
           if (t <= 1) { setGameState(GameState.RESULTS); clearInterval(timer); return 0; }
@@ -341,7 +421,7 @@ const App: React.FC = () => {
       }, 1000);
       return () => clearInterval(timer);
     }
-  }, [gameState, isLevelSuccess, debugPaused]);
+  }, [gameState, isLevelSuccess, debugPaused, paused]);
 
   const applyDebugSpell = () => {
     const chosen = SPELLS.find(s => s.id === debugSpellId);
@@ -541,6 +621,16 @@ const App: React.FC = () => {
                 lastDistance: debugLastDistance
               }}
             />
+
+            {paused && (
+              <div className="absolute inset-0 z-[9999] flex items-center justify-center bg-black/75 backdrop-blur-md">
+                <div className="text-center parchment p-12 rounded-[4rem] border-[10px] border-double shadow-2xl">
+                  <h3 className="wizard-font text-7xl font-black text-[#2c1e14] mb-6">PAUZĖ</h3>
+                  <p className="text-xl font-bold text-[#4a3728] mb-3">Spauskite <span className="font-black">SPACE</span> arba parodykite išskleistą delną.</p>
+                  <p className="text-lg italic text-[#4a3728]">Tas pats gestas / SPACE grąžins į žaidimą.</p>
+                </div>
+              </div>
+            )}
             <div className="absolute top-10 left-10 scale-75 origin-top-left"> 
               {!isLevelSuccess && <SpellGuide spell={activeSpell} />} 
             </div>
