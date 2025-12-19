@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
 import { GameState, Player, GameConfig, Spell, WIZARD_NAMES } from './types';
-import { SPELLS, SYSTEM_INSTRUCTION, SOUNDS, EnhancedSpell } from './constants';
+import { SPELLS, SYSTEM_INSTRUCTION, SOUNDS, EnhancedSpell, getToleranceForDifficulty } from './constants';
 import { MagicEffect } from './components/MagicEffect';
 import { SpellGuide } from './components/SpellGuide';
 import { TrackingOverlay } from './components/TrackingOverlay';
@@ -25,6 +25,14 @@ const App: React.FC = () => {
   const [magicIntensity, setMagicIntensity] = useState(0);
   const [isLevelSuccess, setIsLevelSuccess] = useState(false);
   const [pathProgress, setPathProgress] = useState(0);
+  const [debugMode, setDebugMode] = useState(false);
+  const [debugLastDistance, setDebugLastDistance] = useState<number | null>(null);
+  const [debugPaused, setDebugPaused] = useState(false);
+  const [debugSpellId, setDebugSpellId] = useState<string>(SPELLS[0].id);
+  const [debugLevelInput, setDebugLevelInput] = useState<string>('1');
+
+  const activeSpell = spellQueue[activeQueueIndex];
+  const tolerance = getToleranceForDifficulty(config.difficulty);
 
   // Refs for tracking and stability
   const gameStateRef = useRef(gameState);
@@ -40,6 +48,41 @@ const App: React.FC = () => {
   const animationFrameRef = useRef<number | null>(null);
   const audioRefs = useRef<Record<string, HTMLAudioElement>>({});
   const nextButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const qs = params.get('debug');
+    if (qs === '1' || qs === 'true') {
+      setDebugMode(true);
+      return;
+    }
+    try {
+      const saved = window.localStorage.getItem('wd_debug');
+      if (saved === '1') setDebugMode(true);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'd' || e.key === 'D') {
+        setDebugMode(prev => {
+          const next = !prev;
+          try { window.localStorage.setItem('wd_debug', next ? '1' : '0'); } catch {}
+          return next;
+        });
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  useEffect(() => {
+    setDebugLevelInput(String(currentLevel));
+  }, [currentLevel]);
+
+  useEffect(() => {
+    if (activeSpell?.id) setDebugSpellId(activeSpell.id);
+  }, [activeSpell?.id]);
 
   // Sync refs to avoid stale closures in the frame loop
   useEffect(() => {
@@ -118,7 +161,9 @@ const App: React.FC = () => {
           const hX = indexTip.x * 100;
           const hY = indexTip.y * 100;
           const d = Math.sqrt(Math.pow(hX - currentWp.x, 2) + Math.pow(hY - currentWp.y, 2));
-          const tolerance = configRef.current.difficulty === 'easy' ? 22 : configRef.current.difficulty === 'medium' ? 16 : 10;
+          const tolerance = getToleranceForDifficulty(configRef.current.difficulty);
+
+          setDebugLastDistance(d);
           
           if (d < tolerance) {
             const nextIdx = pathProgressRef.current + 1;
@@ -244,7 +289,7 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    if (gameState === GameState.PLAYING && !isLevelSuccess) {
+    if (gameState === GameState.PLAYING && !isLevelSuccess && !debugPaused) {
       const timer = setInterval(() => {
         setTimeLeft(t => {
           if (t <= 1) { setGameState(GameState.RESULTS); clearInterval(timer); return 0; }
@@ -253,14 +298,113 @@ const App: React.FC = () => {
       }, 1000);
       return () => clearInterval(timer);
     }
-  }, [gameState, isLevelSuccess]);
+  }, [gameState, isLevelSuccess, debugPaused]);
 
-  const activeSpell = spellQueue[activeQueueIndex];
+  const applyDebugSpell = () => {
+    const chosen = SPELLS.find(s => s.id === debugSpellId);
+    if (!chosen) return;
+
+    setGameState(GameState.PLAYING);
+    gameStateRef.current = GameState.PLAYING;
+
+    setCurrentLevel(prev => {
+      const parsed = Number(debugLevelInput);
+      return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : prev;
+    });
+
+    setSpellQueue([chosen]);
+    setActiveQueueIndex(0);
+    setPathProgress(0);
+    setMagicIntensity(0);
+    setIsLevelSuccess(false);
+    setStatusMessage('Atlikite burtą!');
+
+    activeQueueIndexRef.current = 0;
+    pathProgressRef.current = 0;
+    isLevelSuccessRef.current = false;
+    spellQueueRef.current = [chosen];
+    currentSpellRef.current = chosen;
+  };
+
+  const applyDebugLevelOnly = () => {
+    const parsed = Number(debugLevelInput);
+    if (!Number.isFinite(parsed) || parsed <= 0) return;
+    setCurrentLevel(Math.floor(parsed));
+  };
+
+  const resetDebugProgress = () => {
+    setPathProgress(0);
+    setMagicIntensity(0);
+    setIsLevelSuccess(false);
+    setStatusMessage('Atlikite burtą!');
+    pathProgressRef.current = 0;
+    isLevelSuccessRef.current = false;
+  };
 
   return (
     <div className="min-h-screen bg-[#05050a] text-[#f4e4bc] relative flex flex-col items-center justify-center cursor-none select-none overflow-hidden">
       <video ref={videoRef} className={`fixed inset-0 w-full h-full object-cover scale-x-[-1] transition-opacity duration-1000 ${gameState === GameState.PLAYING ? 'opacity-40' : 'opacity-20'}`} playsInline muted />
       <WandCursor x={cursorPos.x} y={cursorPos.y} isPinching={isPinching} />
+
+      {debugMode && (
+        <div className="fixed bottom-6 left-6 z-[9998] pointer-events-auto cursor-auto select-text">
+          <div className="bg-black/70 backdrop-blur-md border border-white/10 rounded-3xl p-4 text-white w-[360px]">
+            <div className="flex items-center justify-between mb-3">
+              <div className="font-mono font-bold text-amber-200">DEBUG CONTROLS</div>
+              <button
+                onClick={() => setDebugPaused(p => !p)}
+                className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 text-sm font-bold"
+              >
+                {debugPaused ? 'Resume' : 'Pause'}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              <button onClick={() => setTimeLeft(t => Math.max(0, t - 5))} className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 text-sm font-bold">-5s</button>
+              <button onClick={() => setTimeLeft(t => Math.min(999, t + 5))} className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 text-sm font-bold">+5s</button>
+              <button onClick={() => setTimeLeft(t => Math.max(0, t - 1))} className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 text-sm font-bold">Step -1s</button>
+              <button onClick={resetDebugProgress} className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 text-sm font-bold">Reset progress</button>
+            </div>
+
+            <div className="mb-3">
+              <label className="block text-xs font-bold uppercase tracking-widest text-white/70 mb-1">Level</label>
+              <div className="flex gap-2">
+                <input
+                  value={debugLevelInput}
+                  onChange={(e) => setDebugLevelInput(e.target.value)}
+                  className="flex-1 bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-sm font-mono outline-none"
+                  inputMode="numeric"
+                />
+                <button onClick={applyDebugLevelOnly} className="px-3 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/20 text-sm font-bold text-amber-200">Set</button>
+              </div>
+            </div>
+
+            <div className="mb-3">
+              <label className="block text-xs font-bold uppercase tracking-widest text-white/70 mb-1">Test spell</label>
+              <select
+                value={debugSpellId}
+                onChange={(e) => setDebugSpellId(e.target.value)}
+                className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-sm font-mono outline-none"
+              >
+                {SPELLS.map(s => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <button
+              onClick={applyDebugSpell}
+              className="w-full px-4 py-3 rounded-2xl bg-amber-500/30 hover:bg-amber-500/40 border border-amber-400/30 text-sm font-black uppercase tracking-widest text-amber-100"
+            >
+              Apply & jump to PLAYING
+            </button>
+
+            <div className="mt-3 text-[11px] font-mono text-white/60">
+              Press <span className="text-white">D</span> to toggle debug.
+            </div>
+          </div>
+        </div>
+      )}
 
       {gameState === GameState.LANDING && (
         <div className="z-20 parchment p-16 rounded-[3rem] text-center shadow-2xl max-w-2xl animate-in zoom-in duration-700">
@@ -325,7 +469,26 @@ const App: React.FC = () => {
           </div>
 
           <div className="relative w-full max-w-6xl aspect-video rounded-[4rem] border-[16px] border-[#2c1e14] shadow-[0_0_50px_rgba(0,0,0,0.8)] overflow-hidden bg-black/40">
-            <TrackingOverlay landmarks={handLandmarks} targetSpell={isLevelSuccess ? undefined : activeSpell} difficulty={config.difficulty} />
+            <TrackingOverlay
+              landmarks={handLandmarks}
+              targetSpell={isLevelSuccess ? undefined : activeSpell}
+              difficulty={config.difficulty}
+              debug={debugMode}
+              debugInfo={{
+                gameState,
+                level: currentLevel,
+                spellId: activeSpell?.id,
+                spellName: activeSpell?.name,
+                pathProgress,
+                queueIndex: activeQueueIndex,
+                queueLength: spellQueue.length,
+                timeLeft,
+                tolerance,
+                cursorPos,
+                isPinching,
+                lastDistance: debugLastDistance
+              }}
+            />
             <div className="absolute top-10 left-10 scale-75 origin-top-left"> 
               {!isLevelSuccess && <SpellGuide spell={activeSpell} />} 
             </div>

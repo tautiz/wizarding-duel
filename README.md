@@ -42,6 +42,53 @@ python -m http.server 8000 -d dist
 4. **Burtų leidimas:** Sekite geltoną liniją ir praeikite per visus kontrolinius taškus.
 5. **Kombinacijos:** Aukštesniuose lygiuose turėsite atlikti burtų sekas be klaidų.
 
+## 🧪 Debug rėžimas
+
+Debug rėžimas skirtas testuoti gesto sekimą ir burtų „waypoints“ logiką.
+
+### Kaip įjungti
+
+- **Per URL**
+Atidarykite su parametru:
+`?debug=1`
+
+- **Klavišu**
+Paspauskite `D` (toggle). Nustatymas išsaugomas naršyklėje (`localStorage`), todėl liks įjungtas po refresh.
+
+### Ką rodo
+
+- **Waypoint taškai**
+Matysite visus `waypoints` taškus ant žaidimo vaizdo.
+
+- **Būsenos spalvomis**
+Praeiti (žalia), aktyvus (geltona), būsimi (pilka).
+
+- **Tolerancijos zona**
+Aplink aktyvų waypoint piešiamas brūkšniuotas ratas (tolerancijos riba pagal pasirinktą sudėtingumą).
+
+- **Debug panelė**
+Viršuje dešinėje rodoma:
+`state`, `level`, `spell`, `queue`, `progress`, `tolerance`, `timeLeft`, `cursor`, `pinch`, `distToWp`.
+
+### Debug valdymo panelė
+
+Apačioje kairėje atsiranda **Debug Controls** panelė, kuri leidžia testuoti be laukimo:
+
+- **Pause/Resume**
+Sustabdo arba paleidžia žaidimo skaitliuką (timer).
+
+- **-5s / +5s / Step -1s**
+Rankiniu būdu koreguoja `timeLeft`.
+
+- **Reset progress**
+Atstato dabartinio burto waypoint progresą į pradžią.
+
+- **Level (Set)**
+Leidžia ranka nustatyti `level`.
+
+- **Test spell + Apply & jump to PLAYING**
+Pasirenkate burtą iš sąrašo ir iškart peršokate į `PLAYING` su pasirinktu burtu.
+
 ## 🛠 Technologijos
 *   **React** UI logikai.
 *   **MediaPipe Hands** rankų sekimui realiu laiku.

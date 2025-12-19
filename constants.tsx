@@ -6,6 +6,10 @@ export interface Waypoint {
   y: number;
 }
 
+export const getToleranceForDifficulty = (difficulty: 'easy' | 'medium' | 'hard') => {
+  return difficulty === 'easy' ? 22 : difficulty === 'medium' ? 16 : 10;
+};
+
 export interface EnhancedSpell extends Spell {
   waypoints: Waypoint[];
 }
