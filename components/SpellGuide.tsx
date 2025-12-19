@@ -13,7 +13,7 @@ export const SpellGuide: React.FC<SpellGuideProps> = ({ spell }) => {
         {spell.gestureDescription}
       </div>
       
-      <div className="relative w-48 h-48 bg-white/5 rounded-full flex items-center justify-center overflow-hidden border-2 border-white/10">
+      <div className="relative w-48 h-48 bg-white/5 rounded-full flex items-center justify-center overflow-hidden border-2 border-white/10 scale-x-[-1] origin-center">
         <svg viewBox="0 0 100 100" className="w-40 h-40">
           {/* Kelio fonas */}
           <path
