@@ -1,0 +1,8 @@
+{
+  "name": "Wizarding Duel: Gesture Master",
+  "description": "A Harry Potter-themed gesture tracking game where players perform wand movements and incantations to cast spells using their webcam and voice.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
