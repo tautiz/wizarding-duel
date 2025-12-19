@@ -5,24 +5,33 @@ Tai interaktyvus Harry Potter tematikos žaidimas, kuriame burtus leidžiate nau
 
 ## 🚀 Kaip paleisti lokaliai?
 
-Kadangi projektas naudoja modernius ES modulius ir MediaPipe bibliotekas, jį reikia paleisti per vietinį serverį (HTTP server).
+Tai yra **Vite + React (TypeScript)** projektas. Dėl to paprastas `npx serve .` (be build) nėra patikimas būdas, nes naršyklė nemoka vykdyti `.tsx` failų ir negauna Vite transformacijų.
 
 ### 1 būdas: VS Code (rekomenduojama)
-1. Atidarykite projektą su **VS Code**.
-2. Įsidiekite papildinį **"Live Server"**.
-3. Apatiniame dešiniame kampe spauskite **"Go Live"**.
-4. Naršyklėje atsidarys `http://127.0.0.1:5500`.
+1. Įdiekite priklausomybes:
+```bash
+npm install
+```
+2. Paleiskite Vite dev serverį:
+```bash
+npm run dev
+```
+3. Atidarykite `http://localhost:3000`.
 
 ### 2 būdas: Node.js (npx)
-Jei turite įdiegtą Node.js, paleiskite šią komandą projekto aplanke:
+Jei norite patiekti **statinį** build (pvz., demonstracijai), pirma sugeneruokite build:
 ```bash
-npx serve .
+npm run build
+```
+Tada patiekite `dist` katalogą:
+```bash
+npx serve dist
 ```
 
 ### 3 būdas: Python
-Jei naudojate Python:
+Jei norite patiekti **statinį** build su Python:
 ```bash
-python -m http.server 8000
+python -m http.server 8000 -d dist
 ```
 
 ## 🎮 Kaip žaisti?
