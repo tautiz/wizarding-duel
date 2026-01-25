@@ -111,12 +111,12 @@ export const SPELLS: EnhancedSpell[] = [
     id: 'expecto-patronum',
     name: 'Expecto Patronum',
     incantation: 'Expecto Patronum',
-    description: 'Nubrėžk didelį sidabrinį pusmėnulį!',
-    gestureDescription: 'PUSMĖNULIS!',
+    description: 'Nubrėžk P raidę - pradėk nuo apačios į viršų!',
+    gestureDescription: 'P RAIDĖ!',
     color: '#ecf0f1',
     difficulty: 3,
-    gesturePath: 'M 80 20 A 40 40 0 1 1 80 80',
-    waypoints: [{ x: 80, y: 25 }, { x: 60, y: 25 }, { x: 40, y: 50 }, { x: 60, y: 75 }, { x: 80, y: 75 }]
+    gesturePath: 'M 35 80 L 35 25 Q 60 25 60 40 Q 60 55 35 55',
+    waypoints: [{ x: 35, y: 80 }, { x: 35, y: 65 }, { x: 35, y: 50 }, { x: 35, y: 35 }, { x: 35, y: 25 }, { x: 48, y: 25 }, { x: 60, y: 32 }, { x: 60, y: 40 }, { x: 55, y: 50 }, { x: 35, y: 55 }]
   },
 
   // --- KONTROLĖS IR JUDĖJIMO ---
