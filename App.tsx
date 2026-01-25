@@ -43,6 +43,7 @@ const App: React.FC = () => {
   const [debugLastDistance, setDebugLastDistance] = useState<number | null>(null);
   const [debugPaused, setDebugPaused] = useState(false);
   const [debugShowHand, setDebugShowHand] = useState(false);
+  const [showSystemCursor, setShowSystemCursor] = useState(false);
   const [debugSpellId, setDebugSpellId] = useState<string>(SPELLS[0].id);
   const [debugLevelInput, setDebugLevelInput] = useState<string>('1');
   const [lastScoreAward, setLastScoreAward] = useState<number | null>(null);
@@ -68,6 +69,9 @@ const App: React.FC = () => {
   const timeLeftRef = useRef(timeLeft);
   const activeQueueIndexRef = useRef(0);
   const spellQueueRef = useRef<EnhancedSpell[]>(spellQueue);
+  const teamSessionRef = useRef<TeamSession | null>(null);
+  const currentTeamPlayerRef = useRef<TeamPlayer | null>(null);
+  const teamTimeLeftRef = useRef(0);
 
   const gestureDetectorsRef = useRef(createGestureDetectors());
   const pauseToggleCooldownUntilRef = useRef(0);
@@ -106,6 +110,34 @@ const App: React.FC = () => {
     setGameState(GameState.SETUP);
   }, []);
 
+  const exitTeamToSetup = useCallback(() => {
+    setPaused(false);
+    pausedRef.current = false;
+    setDebugPaused(false);
+    setIsLevelSuccess(false);
+    isLevelSuccessRef.current = false;
+    setShowPracticeOverlay(false);
+    setIsPracticeMode(false);
+
+    setMagicIntensity(0);
+    setPathProgress(0);
+    pathProgressRef.current = 0;
+    setActiveQueueIndex(0);
+    activeQueueIndexRef.current = 0;
+
+    setTeamTimeLeft(0);
+    setCurrentLevel(1);
+    setLastScoreAward(null);
+    setStatusMessage('');
+    setActiveEffects({ p1: false, p2: false });
+
+    setTeamSession(null);
+    setCurrentTeamPlayer(null);
+
+    setGameMode('team');
+    setGameState(GameState.TEAM_SETUP);
+  }, []);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const qs = params.get('debug');
@@ -116,6 +148,13 @@ const App: React.FC = () => {
     try {
       const saved = window.localStorage.getItem('wd_debug');
       if (saved === '1') setDebugMode(true);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem('wd_show_system_cursor');
+      if (saved === '1') setShowSystemCursor(true);
     } catch {}
   }, []);
 
@@ -134,6 +173,26 @@ const App: React.FC = () => {
           if (now < exitCooldownUntilRef.current) return;
           exitCooldownUntilRef.current = now + 800;
           exitToSetup();
+        }
+
+        if (
+          gameStateRef.current === GameState.TEAM_PLAYING ||
+          gameStateRef.current === GameState.TEAM_PRACTICE
+        ) {
+          e.preventDefault();
+          const now = Date.now();
+          if (now < exitCooldownUntilRef.current) return;
+          exitCooldownUntilRef.current = now + 800;
+          exitTeamToSetup();
+        }
+
+        if (gameStateRef.current === GameState.TEAM_SETUP) {
+          e.preventDefault();
+          const now = Date.now();
+          if (now < exitCooldownUntilRef.current) return;
+          exitCooldownUntilRef.current = now + 800;
+          setGameMode('solo');
+          setGameState(GameState.MODE_SELECT);
         }
         return;
       }
@@ -156,10 +215,19 @@ const App: React.FC = () => {
           return next;
         });
       }
+
+      if (e.key === 'm' || e.key === 'M') {
+        if (e.repeat) return;
+        setShowSystemCursor(prev => {
+          const next = !prev;
+          try { window.localStorage.setItem('wd_show_system_cursor', next ? '1' : '0'); } catch {}
+          return next;
+        });
+      }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [exitToSetup]);
+  }, [exitToSetup, exitTeamToSetup]);
 
   useEffect(() => {
     setDebugLevelInput(String(currentLevel));
@@ -180,7 +248,10 @@ const App: React.FC = () => {
     timeLeftRef.current = timeLeft;
     activeQueueIndexRef.current = activeQueueIndex;
     spellQueueRef.current = spellQueue;
-  }, [gameState, spellQueue, activeQueueIndex, pathProgress, isLevelSuccess, paused, config, timeLeft]);
+    teamSessionRef.current = teamSession;
+    currentTeamPlayerRef.current = currentTeamPlayer;
+    teamTimeLeftRef.current = teamTimeLeft;
+  }, [gameState, spellQueue, activeQueueIndex, pathProgress, isLevelSuccess, paused, config, timeLeft, teamSession, currentTeamPlayer, teamTimeLeft]);
 
   useEffect(() => {
     if (gameState !== GameState.PLAYING) setPaused(false);
@@ -230,6 +301,46 @@ const App: React.FC = () => {
     setStatusMessage("GRANDINĖ UŽBAIGTA!");
     playSound('success');
   }, [activePlayerIndex]);
+
+  const handleTeamSpellComplete = useCallback(() => {
+    const session = teamSessionRef.current;
+    const player = currentTeamPlayerRef.current;
+    if (!session || !player) return;
+
+    const mult = getDifficultyConfig(configRef.current.difficulty).scoreMultiplier;
+    const scoreToAdd = calculateLevelScore({
+      difficultyMultiplier: mult,
+      comboLength: spellQueueRef.current.length,
+      timeLeftSeconds: teamTimeLeftRef.current,
+    });
+
+    const nextScore = player.score + scoreToAdd;
+    setCurrentTeamPlayer(prev => prev ? { ...prev, score: nextScore } : null);
+    setTeamSession(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        players: prev.players.map(p => (p.id === player.id ? { ...p, score: nextScore } : p)),
+      };
+    });
+    setLastScoreAward(scoreToAdd);
+    setActiveEffects({ p1: true, p2: false });
+    playSound('success');
+
+    setCurrentLevel(l => l + 1);
+
+    const randomSpell = SPELLS[Math.floor(Math.random() * SPELLS.length)];
+    setSpellQueue([randomSpell]);
+    setActiveQueueIndex(0);
+    setPathProgress(0);
+    setMagicIntensity(0);
+    setStatusMessage('Atlikite burtą!');
+
+    activeQueueIndexRef.current = 0;
+    pathProgressRef.current = 0;
+    spellQueueRef.current = [randomSpell];
+    currentSpellRef.current = randomSpell;
+  }, []);
 
   const onResults = useCallback((results: any) => {
     if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
@@ -353,7 +464,7 @@ const App: React.FC = () => {
                 setMagicIntensity(100);
                 
                 if (gameStateRef.current === GameState.TEAM_PLAYING) {
-                  handleTeamLevelComplete();
+                  handleTeamSpellComplete();
                 } else if (gameStateRef.current === GameState.TEAM_PRACTICE) {
                   // Practice complete - show success overlay
                   setIsLevelSuccess(true);
@@ -392,7 +503,12 @@ const App: React.FC = () => {
       setIsPinching(false);
       gestureDetectorsRef.current.update(null, false);
     }
-  }, [handleLevelComplete, exitToSetup]);
+  }, [handleLevelComplete, handleTeamSpellComplete, exitToSetup]);
+
+  const onResultsRef = useRef(onResults);
+  useEffect(() => {
+    onResultsRef.current = onResults;
+  }, [onResults]);
 
   useEffect(() => {
     let active = true;
@@ -404,7 +520,7 @@ const App: React.FC = () => {
       hands.setOptions({
         maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5
       });
-      hands.onResults((res: any) => { if (active) onResults(res); });
+      hands.onResults((res: any) => onResultsRef.current(res));
       handsRef.current = hands;
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 }, audio: false });
@@ -431,7 +547,7 @@ const App: React.FC = () => {
       const stream = videoRef.current?.srcObject as MediaStream;
       stream?.getTracks().forEach(t => t.stop());
     };
-  }, [onResults]);
+  }, []);
 
   const startGame = () => {
     const s = getDifficultyConfig(config.difficulty).startTime;
@@ -602,6 +718,37 @@ const App: React.FC = () => {
     }
   };
 
+  const endCurrentPlayerTurn = useCallback(() => {
+    const session = teamSessionRef.current;
+    const player = currentTeamPlayerRef.current;
+    if (!session || !player) return;
+
+    const playerInSession = session.players.find(p => p.id === player.id);
+    const finalScore = playerInSession?.score ?? player.score;
+
+    const updatedSession = teamGameService.endPlayerGame(
+      session,
+      player.id,
+      finalScore,
+      currentLevel - 1
+    );
+    setTeamSession(updatedSession);
+
+    const nextPlayer = teamGameService.getNextPlayer(updatedSession);
+    if (nextPlayer) {
+      if (!nextPlayer.hasCompletedPractice) {
+        startPlayerPractice(updatedSession, nextPlayer);
+      } else {
+        setCurrentTeamPlayer(nextPlayer);
+        startRealGameForPlayer(updatedSession, nextPlayer);
+      }
+    } else {
+      const finalSession = teamGameService.finalizeSession(updatedSession);
+      setTeamSession(finalSession);
+      setGameState(GameState.TEAM_RESULTS);
+    }
+  }, [currentLevel]);
+
   const startTeamGame = (playerNames: string[], totalTime: number, difficulty: string) => {
     const session = teamGameService.createTeamSession(playerNames.length, totalTime, difficulty, playerNames);
     setTeamSession(session);
@@ -693,12 +840,8 @@ const App: React.FC = () => {
   const startRealGameForPlayer = (session: TeamSession, player: TeamPlayer) => {
     setIsPracticeMode(false);
     setGameState(GameState.TEAM_PLAYING);
-    
-    const timePerPlayer = teamGameService.calculateTimePerPlayer(
-      session.players.length * 120,
-      session.players.length
-    );
-    setTeamTimeLeft(timePerPlayer);
+
+    setTeamTimeLeft(session.timePerPlayer);
     
     setCurrentLevel(1);
     const initialQueue = [SPELLS[0]];
@@ -719,33 +862,6 @@ const App: React.FC = () => {
     setTeamSession(updatedSession);
     
     playSound('swish');
-  };
-
-  const endCurrentPlayerTurn = () => {
-    if (!teamSession || !currentTeamPlayer) return;
-    
-    const updatedSession = teamGameService.endPlayerGame(
-      teamSession,
-      currentTeamPlayer.id,
-      currentTeamPlayer.score,
-      currentLevel - 1
-    );
-    setTeamSession(updatedSession);
-    
-    const nextPlayer = teamGameService.getNextPlayer(updatedSession);
-    
-    if (nextPlayer) {
-      if (!nextPlayer.hasCompletedPractice) {
-        startPlayerPractice(updatedSession, nextPlayer);
-      } else {
-        setCurrentTeamPlayer(nextPlayer);
-        startRealGameForPlayer(updatedSession, nextPlayer);
-      }
-    } else {
-      const finalSession = teamGameService.finalizeSession(updatedSession);
-      setTeamSession(finalSession);
-      setGameState(GameState.TEAM_RESULTS);
-    }
   };
 
   const handleTeamLevelComplete = useCallback(() => {
@@ -779,15 +895,13 @@ const App: React.FC = () => {
     setPathProgress(0);
     setMagicIntensity(0);
     setCurrentLevel(newLevel);
-    
-    const timeBonus = newQueue.length * 8;
-    setTeamTimeLeft(t => Math.min(120, t + timeBonus));
+
     setStatusMessage(newQueue.length > 1 ? "PASIRUOŠKITE KOMBINACIJAI!" : "Atlikite burtą!");
     playSound('swish');
   };
 
   return (
-    <div className="min-h-screen bg-[#05050a] text-[#f4e4bc] relative flex flex-col items-center justify-center cursor-none select-none overflow-hidden">
+    <div className={`min-h-screen bg-[#05050a] text-[#f4e4bc] relative flex flex-col items-center justify-center ${showSystemCursor ? 'cursor-auto' : 'cursor-none'} select-none overflow-hidden`}>
       <video ref={videoRef} className={`fixed inset-0 w-full h-full object-cover scale-x-[-1] transition-opacity duration-1000 ${gameState === GameState.PLAYING ? 'opacity-40' : 'opacity-20'}`} playsInline muted />
       <WandCursor x={cursorPos.x} y={cursorPos.y} isPinching={isPinching} />
 

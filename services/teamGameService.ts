@@ -9,9 +9,12 @@ class TeamGameService {
     difficulty: string,
     playerNames: string[]
   ): TeamSession {
+    const timePerPlayer = this.calculateTimePerPlayer(totalTime, playerCount);
     const session: TeamSession = {
       id: `team_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       players: playerNames.map((name, idx) => createTeamPlayer(idx + 1, name)),
+      totalTimeLimit: totalTime,
+      timePerPlayer,
       totalScore: 0,
       difficulty,
       createdAt: new Date(),

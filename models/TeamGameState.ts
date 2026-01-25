@@ -15,6 +15,8 @@ export interface TeamSession {
   id: string;
   teamName?: string;
   players: TeamPlayer[];
+  totalTimeLimit: number;
+  timePerPlayer: number;
   totalScore: number;
   difficulty: string;
   completedAt?: Date;
@@ -37,6 +39,8 @@ export const createTeamSession = (
 ): TeamSession => ({
   id: `team_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
   players: [],
+  totalTimeLimit: totalTime,
+  timePerPlayer: Math.floor(totalTime / playerCount),
   totalScore: 0,
   difficulty,
   createdAt: new Date(),
