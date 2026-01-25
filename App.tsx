@@ -7,13 +7,24 @@ import { MagicEffect } from './components/MagicEffect';
 import { SpellGuide } from './components/SpellGuide';
 import { TrackingOverlay } from './components/TrackingOverlay';
 import { WandCursor } from './components/WandCursor';
+import { ModeSelect } from './components/ModeSelect';
+import { TeamSetup } from './components/TeamSetup';
+import { TeamPracticeMode } from './components/TeamPracticeMode';
+import { TeamResults } from './components/TeamResults';
+import { DebugPanel } from './components/DebugPanel';
 import { encode, decode, decodeAudioData } from './services/audioUtils';
 import { createGestureDetectors } from './gestures/GestureDetectors';
+import { calculateLevelScore } from './services/scoring';
+import { TeamSession } from './models/TeamGameState';
+import { TeamPlayer } from './models/TeamPlayer';
+import { teamGameService } from './services/teamGameService';
+import { storageService } from './services/storageService';
 
 const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>(GameState.LANDING);
   const [config, setConfig] = useState<GameConfig>({ voiceEnabled: false, playerCount: 1, difficulty: DEFAULT_DIFFICULTY_ID });
   const [players, setPlayers] = useState<Player[]>([{ id: 1, name: 'Haris', score: 0 }]);
+  const [activePlayerIndex, setActivePlayerIndex] = useState(0);
   const [currentLevel, setCurrentLevel] = useState(1);
   const [spellQueue, setSpellQueue] = useState<EnhancedSpell[]>([SPELLS[0]]);
   const [activeQueueIndex, setActiveQueueIndex] = useState(0);
@@ -34,6 +45,15 @@ const App: React.FC = () => {
   const [debugShowHand, setDebugShowHand] = useState(false);
   const [debugSpellId, setDebugSpellId] = useState<string>(SPELLS[0].id);
   const [debugLevelInput, setDebugLevelInput] = useState<string>('1');
+  const [lastScoreAward, setLastScoreAward] = useState<number | null>(null);
+
+  const [gameMode, setGameMode] = useState<'solo' | 'team'>('solo');
+  const [teamSession, setTeamSession] = useState<TeamSession | null>(null);
+  const [currentTeamPlayer, setCurrentTeamPlayer] = useState<TeamPlayer | null>(null);
+  const [teamTimeLeft, setTeamTimeLeft] = useState(0);
+  const [isPracticeMode, setIsPracticeMode] = useState(false);
+  const [showPracticeOverlay, setShowPracticeOverlay] = useState(false);
+  const [practiceSpellsCompleted, setPracticeSpellsCompleted] = useState(0);
 
   const activeSpell = spellQueue[activeQueueIndex];
   const tolerance = getToleranceForDifficulty(config.difficulty);
@@ -45,6 +65,7 @@ const App: React.FC = () => {
   const isLevelSuccessRef = useRef(isLevelSuccess);
   const pausedRef = useRef(paused);
   const configRef = useRef(config);
+  const timeLeftRef = useRef(timeLeft);
   const activeQueueIndexRef = useRef(0);
   const spellQueueRef = useRef<EnhancedSpell[]>(spellQueue);
 
@@ -76,6 +97,7 @@ const App: React.FC = () => {
     setActiveEffects({ p1: false, p2: false });
     setStatusMessage('Pasiruoškite dvikovai!');
     setTimeLeft(getDifficultyConfig(configRef.current.difficulty).startTime);
+    setLastScoreAward(null);
 
     gestureDetectorsRef.current.reset();
     pauseToggleCooldownUntilRef.current = 0;
@@ -155,9 +177,10 @@ const App: React.FC = () => {
     isLevelSuccessRef.current = isLevelSuccess;
     pausedRef.current = paused;
     configRef.current = config;
+    timeLeftRef.current = timeLeft;
     activeQueueIndexRef.current = activeQueueIndex;
     spellQueueRef.current = spellQueue;
-  }, [gameState, spellQueue, activeQueueIndex, pathProgress, isLevelSuccess, paused, config]);
+  }, [gameState, spellQueue, activeQueueIndex, pathProgress, isLevelSuccess, paused, config, timeLeft]);
 
   useEffect(() => {
     if (gameState !== GameState.PLAYING) setPaused(false);
@@ -196,12 +219,17 @@ const App: React.FC = () => {
     isLevelSuccessRef.current = true;
     
     const mult = getDifficultyConfig(configRef.current.difficulty).scoreMultiplier;
-    const comboBonus = spellQueueRef.current.length * 50;
-    setPlayers(p => p.map(x => ({ ...x, score: x.score + Math.round((100 * mult) + comboBonus) })));
+    const scoreToAdd = calculateLevelScore({
+      difficultyMultiplier: mult,
+      comboLength: spellQueueRef.current.length,
+      timeLeftSeconds: timeLeftRef.current,
+    });
+    setLastScoreAward(scoreToAdd);
+    setPlayers(p => p.map((x, idx) => (idx === activePlayerIndex ? { ...x, score: x.score + scoreToAdd } : x)));
     setActiveEffects({ p1: true, p2: false });
     setStatusMessage("GRANDINĖ UŽBAIGTA!");
     playSound('success');
-  }, []);
+  }, [activePlayerIndex]);
 
   const onResults = useCallback((results: any) => {
     if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
@@ -279,8 +307,12 @@ const App: React.FC = () => {
         }
       }
 
-      // GAMEPLAY logic
-      if (gameStateRef.current === GameState.PLAYING && !isLevelSuccessRef.current && !pausedRef.current) {
+      // GAMEPLAY logic (Solo and Team)
+      const isGameplayState = gameStateRef.current === GameState.PLAYING || 
+                              gameStateRef.current === GameState.TEAM_PLAYING ||
+                              gameStateRef.current === GameState.TEAM_PRACTICE;
+      
+      if (isGameplayState && !isLevelSuccessRef.current && !pausedRef.current) {
         const spell = currentSpellRef.current;
         if (!spell) return;
         
@@ -299,7 +331,10 @@ const App: React.FC = () => {
             const nextIdx = pathProgressRef.current + 1;
             setPathProgress(nextIdx);
             pathProgressRef.current = nextIdx;
-            setMagicIntensity((nextIdx / spell.waypoints.length) * 100);
+            
+            // Update magic intensity - ensure it reaches 100% on last waypoint
+            const intensity = Math.min(100, (nextIdx / spell.waypoints.length) * 100);
+            setMagicIntensity(intensity);
             playSound('swish');
             
             // Check if current spell finished
@@ -314,8 +349,21 @@ const App: React.FC = () => {
                 setStatusMessage("TĘSKITE GRANDINĘ!");
                 playSound('success');
               } else {
-                // Entire queue finished
-                handleLevelComplete();
+                // Entire queue finished - ensure 100% intensity first
+                setMagicIntensity(100);
+                
+                if (gameStateRef.current === GameState.TEAM_PLAYING) {
+                  handleTeamLevelComplete();
+                } else if (gameStateRef.current === GameState.TEAM_PRACTICE) {
+                  // Practice complete - show success overlay
+                  setIsLevelSuccess(true);
+                  isLevelSuccessRef.current = true;
+                  setActiveEffects({ p1: true, p2: false });
+                  setStatusMessage("PUIKU!");
+                  playSound('success');
+                } else {
+                  handleLevelComplete();
+                }
               }
             }
           }
@@ -387,7 +435,21 @@ const App: React.FC = () => {
 
   const startGame = () => {
     const s = getDifficultyConfig(config.difficulty).startTime;
-    setPlayers([{ id: 1, name: players[0].name, score: 0 }]);
+    const desiredCount = Math.max(1, Math.min(3, Math.floor(config.playerCount || 1)));
+    setPlayers(prev => {
+      const base = prev.length ? prev : [{ id: 1, name: 'Haris', score: 0 }];
+      const out: Player[] = [];
+      for (let i = 0; i < desiredCount; i++) {
+        const existing = base[i];
+        out.push({
+          id: i + 1,
+          name: existing?.name ?? WIZARD_NAMES[i % WIZARD_NAMES.length],
+          score: 0,
+        });
+      }
+      return out;
+    });
+    setActivePlayerIndex(0);
     setCurrentLevel(1);
     const initialQueue = [SPELLS[0]];
     setSpellQueue(initialQueue);
@@ -396,6 +458,7 @@ const App: React.FC = () => {
     setMagicIntensity(0);
     setPathProgress(0);
     setIsLevelSuccess(false);
+    setLastScoreAward(null);
     setGameState(GameState.PLAYING);
     setStatusMessage("Atlikite burtą!");
     playSound('swish');
@@ -403,6 +466,7 @@ const App: React.FC = () => {
 
   const nextLvl = () => {
     setIsLevelSuccess(false);
+    setLastScoreAward(null);
     const newLevel = currentLevel + 1;
     const newQueue = generateSpellQueue(newLevel);
     
@@ -416,7 +480,29 @@ const App: React.FC = () => {
     const timeBonus = newQueue.length * 8;
     setTimeLeft(t => Math.min(120, t + timeBonus));
     setStatusMessage(newQueue.length > 1 ? "PASIRUOŠKITE KOMBINACIJAI!" : "Atlikite burtą!");
+
+    setActivePlayerIndex(prev => {
+      const count = Math.max(1, players.length);
+      return (prev + 1) % count;
+    });
     playSound('swish');
+  };
+
+  const setPlayerCount = (count: number) => {
+    const nextCount = Math.max(1, Math.min(3, Math.floor(count)));
+    setConfig(prev => ({ ...prev, playerCount: nextCount }));
+    setPlayers(prev => {
+      const out: Player[] = [];
+      for (let i = 0; i < nextCount; i++) {
+        out.push({
+          id: i + 1,
+          name: prev[i]?.name ?? WIZARD_NAMES[i % WIZARD_NAMES.length],
+          score: prev[i]?.score ?? 0,
+        });
+      }
+      return out;
+    });
+    setActivePlayerIndex(p => Math.min(p, nextCount - 1));
   };
 
   useEffect(() => {
@@ -424,6 +510,21 @@ const App: React.FC = () => {
       const timer = setInterval(() => {
         setTimeLeft(t => {
           if (t <= 1) { setGameState(GameState.RESULTS); clearInterval(timer); return 0; }
+          return t - 1;
+        });
+      }, 1000);
+      return () => clearInterval(timer);
+    }
+  }, [gameState, isLevelSuccess, debugPaused, paused]);
+
+  useEffect(() => {
+    if (gameState === GameState.TEAM_PLAYING && !isLevelSuccess && !debugPaused && !paused) {
+      const timer = setInterval(() => {
+        setTeamTimeLeft(t => {
+          if (t <= 1) {
+            endCurrentPlayerTurn();
+            return 0;
+          }
           return t - 1;
         });
       }, 1000);
@@ -470,6 +571,219 @@ const App: React.FC = () => {
     setStatusMessage('Atlikite burtą!');
     pathProgressRef.current = 0;
     isLevelSuccessRef.current = false;
+  };
+
+  const handleDebugApplySpell = (spellId: string, level: number) => {
+    const chosen = SPELLS.find(s => s.id === spellId);
+    if (!chosen) return;
+
+    setGameState(GameState.PLAYING);
+    gameStateRef.current = GameState.PLAYING;
+    setCurrentLevel(level);
+    setSpellQueue([chosen]);
+    setActiveQueueIndex(0);
+    setPathProgress(0);
+    setMagicIntensity(0);
+    setIsLevelSuccess(false);
+    setStatusMessage('Atlikite burtą!');
+
+    activeQueueIndexRef.current = 0;
+    pathProgressRef.current = 0;
+    isLevelSuccessRef.current = false;
+    spellQueueRef.current = [chosen];
+    currentSpellRef.current = chosen;
+  };
+
+  const handleDebugTimeAdjust = (amount: number) => {
+    if (gameMode === 'team') {
+      setTeamTimeLeft(t => Math.max(0, Math.min(999, t + amount)));
+    } else {
+      setTimeLeft(t => Math.max(0, Math.min(999, t + amount)));
+    }
+  };
+
+  const startTeamGame = (playerNames: string[], totalTime: number, difficulty: string) => {
+    const session = teamGameService.createTeamSession(playerNames.length, totalTime, difficulty, playerNames);
+    setTeamSession(session);
+    setConfig(prev => ({ ...prev, difficulty }));
+    setGameMode('team');
+    
+    const firstPlayer = session.players[0];
+    if (firstPlayer) {
+      startPlayerPractice(session, firstPlayer);
+    }
+  };
+
+  const startPlayerPractice = (session: TeamSession, player: TeamPlayer) => {
+    setCurrentTeamPlayer(player);
+    setIsPracticeMode(true);
+    setShowPracticeOverlay(true);
+    setGameState(GameState.TEAM_PRACTICE);
+    setPracticeSpellsCompleted(0);
+    
+    const practiceSpell = SPELLS.find(s => s.difficulty === 1) || SPELLS[0];
+    setSpellQueue([practiceSpell]);
+    setActiveQueueIndex(0);
+    setPathProgress(0);
+    setMagicIntensity(0);
+    setIsLevelSuccess(false);
+    setStatusMessage(`${player.name}, 3 pratybų burtai!`);
+
+    activeQueueIndexRef.current = 0;
+    pathProgressRef.current = 0;
+    isLevelSuccessRef.current = false;
+    spellQueueRef.current = [practiceSpell];
+    currentSpellRef.current = practiceSpell;
+    
+    const updatedSession = teamGameService.startPlayerPractice(session, player.id);
+    setTeamSession(updatedSession);
+  };
+
+  const startPracticeSpells = () => {
+    setShowPracticeOverlay(false);
+    setIsLevelSuccess(false);
+    isLevelSuccessRef.current = false;
+    setStatusMessage('Atlikite burtą!');
+  };
+
+  const skipPracticeAndStart = () => {
+    if (!teamSession || !currentTeamPlayer) return;
+    
+    const updatedSession = teamGameService.completePlayerPractice(teamSession, currentTeamPlayer.id);
+    setTeamSession(updatedSession);
+    setShowPracticeOverlay(false);
+    
+    startRealGameForPlayer(updatedSession, currentTeamPlayer);
+  };
+
+  const nextPracticeSpell = () => {
+    const newCount = practiceSpellsCompleted + 1;
+    setPracticeSpellsCompleted(newCount);
+    
+    if (newCount >= 3) {
+      // Po 3 burtų automatiškai pradėti žaidimą
+      if (teamSession && currentTeamPlayer) {
+        const updatedSession = teamGameService.completePlayerPractice(teamSession, currentTeamPlayer.id);
+        setTeamSession(updatedSession);
+        setShowPracticeOverlay(false);
+        startRealGameForPlayer(updatedSession, currentTeamPlayer);
+      }
+      return;
+    }
+    
+    setIsLevelSuccess(false);
+    isLevelSuccessRef.current = false;
+    
+    const easySpells = SPELLS.filter(s => s.difficulty <= 2);
+    const randomSpell = easySpells[Math.floor(Math.random() * easySpells.length)];
+    
+    setSpellQueue([randomSpell]);
+    setActiveQueueIndex(0);
+    setPathProgress(0);
+    setMagicIntensity(0);
+    pathProgressRef.current = 0;
+    activeQueueIndexRef.current = 0;
+    spellQueueRef.current = [randomSpell];
+    currentSpellRef.current = randomSpell;
+    
+    setStatusMessage(`Pratimas ${newCount + 1}/3`);
+    playSound('swish');
+  };
+
+  const startRealGameForPlayer = (session: TeamSession, player: TeamPlayer) => {
+    setIsPracticeMode(false);
+    setGameState(GameState.TEAM_PLAYING);
+    
+    const timePerPlayer = teamGameService.calculateTimePerPlayer(
+      session.players.length * 120,
+      session.players.length
+    );
+    setTeamTimeLeft(timePerPlayer);
+    
+    setCurrentLevel(1);
+    const initialQueue = [SPELLS[0]];
+    setSpellQueue(initialQueue);
+    setActiveQueueIndex(0);
+    setPathProgress(0);
+    setMagicIntensity(0);
+    setIsLevelSuccess(false);
+    setStatusMessage(`${player.name}, pradėkite!`);
+
+    activeQueueIndexRef.current = 0;
+    pathProgressRef.current = 0;
+    isLevelSuccessRef.current = false;
+    spellQueueRef.current = initialQueue;
+    currentSpellRef.current = initialQueue[0];
+    
+    const updatedSession = teamGameService.startPlayerGame(session, player.id);
+    setTeamSession(updatedSession);
+    
+    playSound('swish');
+  };
+
+  const endCurrentPlayerTurn = () => {
+    if (!teamSession || !currentTeamPlayer) return;
+    
+    const updatedSession = teamGameService.endPlayerGame(
+      teamSession,
+      currentTeamPlayer.id,
+      currentTeamPlayer.score,
+      currentLevel - 1
+    );
+    setTeamSession(updatedSession);
+    
+    const nextPlayer = teamGameService.getNextPlayer(updatedSession);
+    
+    if (nextPlayer) {
+      if (!nextPlayer.hasCompletedPractice) {
+        startPlayerPractice(updatedSession, nextPlayer);
+      } else {
+        setCurrentTeamPlayer(nextPlayer);
+        startRealGameForPlayer(updatedSession, nextPlayer);
+      }
+    } else {
+      const finalSession = teamGameService.finalizeSession(updatedSession);
+      setTeamSession(finalSession);
+      setGameState(GameState.TEAM_RESULTS);
+    }
+  };
+
+  const handleTeamLevelComplete = useCallback(() => {
+    if (isLevelSuccessRef.current || !teamSession || !currentTeamPlayer) return;
+    setIsLevelSuccess(true);
+    isLevelSuccessRef.current = true;
+    
+    const mult = getDifficultyConfig(configRef.current.difficulty).scoreMultiplier;
+    const scoreToAdd = calculateLevelScore({
+      difficultyMultiplier: mult,
+      comboLength: spellQueueRef.current.length,
+      timeLeftSeconds: teamTimeLeft,
+    });
+    setLastScoreAward(scoreToAdd);
+    
+    setCurrentTeamPlayer(prev => prev ? { ...prev, score: prev.score + scoreToAdd } : null);
+    
+    setActiveEffects({ p1: true, p2: false });
+    setStatusMessage("GRANDINĖ UŽBAIGTA!");
+    playSound('success');
+  }, [teamSession, currentTeamPlayer, teamTimeLeft]);
+
+  const nextTeamLevel = () => {
+    setIsLevelSuccess(false);
+    setLastScoreAward(null);
+    const newLevel = currentLevel + 1;
+    const newQueue = generateSpellQueue(newLevel);
+    
+    setSpellQueue(newQueue);
+    setActiveQueueIndex(0);
+    setPathProgress(0);
+    setMagicIntensity(0);
+    setCurrentLevel(newLevel);
+    
+    const timeBonus = newQueue.length * 8;
+    setTeamTimeLeft(t => Math.min(120, t + timeBonus));
+    setStatusMessage(newQueue.length > 1 ? "PASIRUOŠKITE KOMBINACIJAI!" : "Atlikite burtą!");
+    playSound('swish');
   };
 
   return (
@@ -537,6 +851,68 @@ const App: React.FC = () => {
               Apply & jump to PLAYING
             </button>
 
+            <div className="mt-4 pt-4 border-t border-white/10">
+              <div className="text-xs font-bold uppercase tracking-widest text-white/70 mb-2">Game Info</div>
+              <div className="space-y-1 text-xs font-mono">
+                <div className="flex justify-between">
+                  <span className="text-white/60">Mode:</span>
+                  <span className="text-white font-bold">{gameMode === 'team' ? 'TEAM' : 'SOLO'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-white/60">State:</span>
+                  <span className="text-white font-bold">{gameState}</span>
+                </div>
+                {gameMode === 'team' && currentTeamPlayer && (
+                  <>
+                    <div className="flex justify-between">
+                      <span className="text-white/60">Player:</span>
+                      <span className="text-white font-bold">{currentTeamPlayer.name}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-white/60">Mode:</span>
+                      <span className={`font-bold ${isPracticeMode ? 'text-yellow-400' : 'text-green-400'}`}>
+                        {isPracticeMode ? 'PRACTICE' : 'PLAYING'}
+                      </span>
+                    </div>
+                    {isPracticeMode && (
+                      <div className="flex justify-between">
+                        <span className="text-white/60">Practice:</span>
+                        <span className="text-yellow-400 font-bold">{practiceSpellsCompleted}/3</span>
+                      </div>
+                    )}
+                    {!isPracticeMode && (
+                      <div className="flex justify-between">
+                        <span className="text-white/60">Score:</span>
+                        <span className="text-green-400 font-bold">{currentTeamPlayer.score}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between">
+                      <span className="text-white/60">Time:</span>
+                      <span className="text-white font-bold">{teamTimeLeft}s</span>
+                    </div>
+                  </>
+                )}
+                <div className="flex justify-between">
+                  <span className="text-white/60">Spell:</span>
+                  <span className="text-white font-bold">{activeSpell?.name || 'N/A'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-white/60">Waypoints:</span>
+                  <span className="text-cyan-400 font-bold">
+                    {pathProgress}/{activeSpell?.waypoints.length || 0}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-white/60">Queue:</span>
+                  <span className="text-white font-bold">{activeQueueIndex + 1}/{spellQueue.length}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-white/60">Intensity:</span>
+                  <span className="text-white font-bold">{Math.round(magicIntensity)}%</span>
+                </div>
+              </div>
+            </div>
+
             <div className="mt-3 text-[11px] font-mono text-white/60">
               Press <span className="text-white">D</span> to toggle debug.
             </div>
@@ -548,14 +924,34 @@ const App: React.FC = () => {
         <div className="z-20 parchment p-16 rounded-[3rem] text-center shadow-2xl max-w-2xl animate-in zoom-in duration-700">
           <h1 className="wizard-font text-7xl font-bold mb-8 text-[#2c1e14]">MAGIŠKA DVIKOVA</h1>
           <p className="text-xl italic mb-12 text-[#4a3728] font-serif leading-relaxed">Valdykite lazdelę ranka. Suspauskite pirštus pasirinkimui.<br/>Aukštesniuose lygiuose junkite burtus į grandines!</p>
-          <button onClick={() => setGameState(GameState.SETUP)} className="wizard-font bg-[#2c1e14] text-[#f4e4bc] px-16 py-6 rounded-full text-3xl font-black hover:scale-110 transition-all border-4 border-[#4a3728] active:scale-95">PRADĖTI</button>
+          <button onClick={() => setGameState(GameState.MODE_SELECT)} className="wizard-font bg-[#2c1e14] text-[#f4e4bc] px-16 py-6 rounded-full text-3xl font-black hover:scale-110 transition-all border-4 border-[#4a3728] active:scale-95">PRADĖTI</button>
         </div>
+      )}
+
+      {gameState === GameState.MODE_SELECT && (
+        <ModeSelect
+          onSelectSolo={() => {
+            setGameMode('solo');
+            setGameState(GameState.SETUP);
+          }}
+          onSelectTeam={() => {
+            setGameMode('team');
+            setGameState(GameState.TEAM_SETUP);
+          }}
+        />
+      )}
+
+      {gameState === GameState.TEAM_SETUP && (
+        <TeamSetup
+          onStartTeam={startTeamGame}
+          onBack={() => setGameState(GameState.MODE_SELECT)}
+        />
       )}
 
       {gameState === GameState.SETUP && (
         <div className="z-20 parchment p-12 rounded-[3rem] w-full max-w-4xl shadow-2xl animate-in slide-in-from-bottom duration-500">
           <h2 className="wizard-font text-4xl text-center mb-8 font-bold uppercase tracking-widest">Burtininko Registracija</h2>
-          <div className="grid grid-cols-2 gap-8 mb-10">
+          <div className="grid grid-cols-3 gap-8 mb-10">
             <div className="bg-black/10 p-6 rounded-3xl border border-[#4a3728]/20">
               <h3 className="font-bold mb-4 text-xl font-serif text-[#2c1e14]">LYGIS</h3>
               <div className="flex flex-col gap-3">
@@ -565,10 +961,32 @@ const App: React.FC = () => {
               </div>
             </div>
             <div className="bg-black/10 p-6 rounded-3xl border border-[#4a3728]/20">
-              <h3 className="font-bold mb-4 text-xl font-serif text-[#2c1e14]">VARDAS</h3>
-              <div className="flex flex-wrap gap-2 max-h-[160px] overflow-y-auto pr-2 custom-scrollbar">
-                {WIZARD_NAMES.map(n => (
-                  <button key={n} onClick={() => setPlayers([{...players[0], name: n}])} className={`px-4 py-1.5 rounded-full text-sm font-bold border transition-all ${players[0].name === n ? 'bg-[#2c1e14] text-white' : 'bg-white/50 text-[#2c1e14]'}`}>{n}</button>
+              <h3 className="font-bold mb-4 text-xl font-serif text-[#2c1e14]">ŽAIDĖJAI</h3>
+              <div className="flex flex-col gap-3">
+                {[1, 2, 3].map(n => (
+                  <button key={n} onClick={() => setPlayerCount(n)} className={`py-3 rounded-xl font-bold border-2 transition-all ${config.playerCount === n ? 'bg-[#2c1e14] text-white border-[#d4af37]' : 'bg-white/50 text-[#2c1e14] border-transparent hover:bg-white/80'}`}>{n} žaidėjai</button>
+                ))}
+              </div>
+            </div>
+            <div className="bg-black/10 p-6 rounded-3xl border border-[#4a3728]/20">
+              <h3 className="font-bold mb-4 text-xl font-serif text-[#2c1e14]">VARDŲ PARINKIMAS</h3>
+              <div className="flex flex-col gap-3">
+                {players.map((p, idx) => (
+                  <div key={p.id} className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-[#2c1e14] text-white flex items-center justify-center font-black">{idx + 1}</div>
+                    <select
+                      value={p.name}
+                      onChange={(e) => {
+                        const name = e.target.value;
+                        setPlayers(prev => prev.map((x, i) => (i === idx ? { ...x, name } : x)));
+                      }}
+                      className="flex-1 bg-white/60 border border-[#4a3728]/30 rounded-xl px-3 py-2 text-sm font-bold text-[#2c1e14] outline-none"
+                    >
+                      {WIZARD_NAMES.map(n => (
+                        <option key={n} value={n}>{n}</option>
+                      ))}
+                    </select>
+                  </div>
                 ))}
               </div>
             </div>
@@ -580,9 +998,14 @@ const App: React.FC = () => {
       {gameState === GameState.PLAYING && (
         <div className="z-20 w-full h-full flex flex-col p-6 items-center justify-between">
           <div className="w-full max-w-7xl flex justify-between items-start">
-            <div className="parchment px-8 py-3 rounded-2xl border-4 border-[#4a3728] shadow-2xl">
-              <p className="text-xs font-bold opacity-70 uppercase tracking-widest">{players[0].name}</p>
-              <p className="text-4xl font-black tabular-nums">{players[0].score}</p>
+            <div className="flex gap-3">
+              {players.map((p, idx) => (
+                <div key={p.id} className={`parchment px-6 py-3 rounded-2xl border-4 shadow-2xl transition-all ${idx === activePlayerIndex ? 'border-[#d4af37] scale-105' : 'border-[#4a3728] opacity-90'}`}>
+                  <p className="text-xs font-bold opacity-70 uppercase tracking-widest">{p.name}</p>
+                  <p className="text-4xl font-black tabular-nums">{p.score}</p>
+                  <p className={`text-[11px] font-black uppercase tracking-widest mt-1 ${idx === activePlayerIndex ? 'text-[#2c1e14]' : 'opacity-60'}`}>{idx === activePlayerIndex ? 'Eilė dabar' : 'Laukia'}</p>
+                </div>
+              ))}
             </div>
             
             <div className="flex flex-col items-center">
@@ -648,10 +1071,12 @@ const App: React.FC = () => {
               <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xl animate-in fade-in zoom-in duration-500">
                 <div className="text-center parchment p-16 rounded-[4rem] border-[12px] border-double shadow-2xl">
                   <h3 className="wizard-font text-8xl font-black text-[#2c1e14] mb-8">PUIKU!</h3>
-                  <div className="mb-8 bg-black/5 p-4 rounded-2xl">
-                    <p className="text-[#4a3728] font-bold uppercase tracking-widest text-sm">Combo bonusas</p>
-                    <p className="text-4xl font-black text-[#2c1e14]">+{spellQueue.length * 50} taškų</p>
-                  </div>
+                  {lastScoreAward !== null && (
+                    <div className="mb-8 bg-black/5 p-4 rounded-2xl">
+                      <p className="text-[#4a3728] font-bold uppercase tracking-widest text-sm">Taškai už užduotį</p>
+                      <p className="text-4xl font-black text-[#2c1e14]">+{lastScoreAward}</p>
+                    </div>
+                  )}
                   <button ref={nextButtonRef} onClick={nextLvl} className="wizard-font bg-[#2c1e14] text-[#f4e4bc] px-24 py-8 rounded-full text-5xl font-black shadow-2xl hover:scale-110 active:scale-95 transition-all">TOLIAU</button>
                   <p className="mt-8 text-xl font-bold italic text-[#4a3728] animate-pulse">Sujunkite pirštus virš mygtuko</p>
                 </div>
@@ -672,12 +1097,172 @@ const App: React.FC = () => {
         </div>
       )}
 
+      {(gameState === GameState.TEAM_PLAYING || gameState === GameState.TEAM_PRACTICE) && currentTeamPlayer && (
+        <div className="z-20 w-full h-full flex flex-col p-6 items-center justify-between">
+          <div className="w-full max-w-7xl flex justify-between items-start">
+            <div className="parchment px-8 py-4 rounded-2xl border-4 border-[#d4af37] shadow-2xl">
+              <p className="text-xs font-bold opacity-70 uppercase tracking-widest">Žaidėjas</p>
+              <p className="text-3xl font-black text-[#2c1e14]">{currentTeamPlayer.name}</p>
+              {isPracticeMode ? (
+                <p className="text-xl font-bold text-[#d4af37] mt-1">Pratybos {practiceSpellsCompleted}/3</p>
+              ) : (
+                <p className="text-2xl font-bold text-[#4a3728] mt-1">{currentTeamPlayer.score} tšk</p>
+              )}
+            </div>
+            
+            <div className="flex flex-col items-center">
+              <div className="flex gap-2 mb-4">
+                {spellQueue.map((spell, idx) => (
+                  <div key={idx} className={`px-4 py-2 rounded-xl border-2 transition-all flex items-center gap-2 ${idx === activeQueueIndex ? 'bg-[#d4af37] text-black border-white scale-110 shadow-[0_0_20px_gold]' : idx < activeQueueIndex ? 'bg-green-800 text-white border-green-400 opacity-50' : 'bg-black/60 text-white/40 border-white/20'}`}>
+                    <span className="wizard-font font-bold text-lg">{spell.name}</span>
+                    {idx < activeQueueIndex && <span className="text-xl">✓</span>}
+                  </div>
+                ))}
+              </div>
+              <div className={`px-10 py-2 rounded-full font-mono text-3xl font-bold shadow-xl border-2 border-[#d4af37] ${teamTimeLeft < 10 ? 'bg-red-600 text-white animate-pulse' : 'bg-[#2c1e14] text-[#f4e4bc]'}`}>
+                {teamTimeLeft}s
+              </div>
+            </div>
+
+            <div className="parchment px-8 py-3 rounded-2xl border-4 border-[#4a3728] shadow-2xl text-center">
+              <p className="text-xs font-bold opacity-70 uppercase tracking-widest">Lygis</p>
+              <p className="text-4xl font-black tabular-nums">{currentLevel}</p>
+            </div>
+          </div>
+
+          <div className="relative w-full max-w-6xl aspect-video rounded-[4rem] border-[16px] border-[#2c1e14] shadow-[0_0_50px_rgba(0,0,0,0.8)] overflow-hidden bg-black/40">
+            <div ref={gameAreaRef} className="absolute inset-0" />
+            <TrackingOverlay
+              landmarks={handLandmarks}
+              targetSpell={isLevelSuccess ? undefined : activeSpell}
+              difficulty={config.difficulty}
+              debug={debugMode}
+              debugShowHand={debugShowHand}
+              debugInfo={{
+                gameState,
+                level: currentLevel,
+                spellId: activeSpell?.id,
+                spellName: activeSpell?.name,
+                pathProgress,
+                queueIndex: activeQueueIndex,
+                queueLength: spellQueue.length,
+                timeLeft: teamTimeLeft,
+                tolerance,
+                cursorPos: cursorGamePos,
+                isPinching,
+                lastDistance: debugLastDistance
+              }}
+            />
+
+            {showPracticeOverlay && (
+              <TeamPracticeMode
+                player={currentTeamPlayer}
+                onComplete={startPracticeSpells}
+                onSkip={skipPracticeAndStart}
+              />
+            )}
+
+            {paused && (
+              <div className="absolute inset-0 z-[9999] flex items-center justify-center bg-black/75 backdrop-blur-md">
+                <div className="text-center parchment p-12 rounded-[4rem] border-[10px] border-double shadow-2xl">
+                  <h3 className="wizard-font text-7xl font-black text-[#2c1e14] mb-6">PAUZĖ</h3>
+                  <p className="text-xl font-bold text-[#4a3728] mb-3">Spauskite <span className="font-black">SPACE</span> arba parodykite išskleistą delną.</p>
+                  <p className="text-lg italic text-[#4a3728]">Tas pats gestas / SPACE grąžins į žaidimą.</p>
+                </div>
+              </div>
+            )}
+
+            <div className="absolute top-10 left-10 scale-75 origin-top-left">
+              {!isLevelSuccess && <SpellGuide spell={activeSpell} />}
+            </div>
+            <MagicEffect side="left" active={activeEffects.p1} color={activeSpell.color} spellId={activeSpell.id} />
+            
+            {isLevelSuccess && !showPracticeOverlay && (
+              <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xl animate-in fade-in zoom-in duration-500">
+                <div className="text-center parchment p-16 rounded-[4rem] border-[12px] border-double shadow-2xl">
+                  <h3 className="wizard-font text-8xl font-black text-[#2c1e14] mb-8">PUIKU!</h3>
+                  {isPracticeMode ? (
+                    <div className="mb-8 bg-[#d4af37]/20 p-6 rounded-2xl border-2 border-[#d4af37]">
+                      <p className="text-[#4a3728] font-bold uppercase tracking-widest text-sm">Pratybų progresas</p>
+                      <p className="text-5xl font-black text-[#2c1e14] my-2">{practiceSpellsCompleted + 1}/3</p>
+                      <p className="text-sm text-[#4a3728] italic">
+                        {practiceSpellsCompleted + 1 < 3 ? 'Tęskite pratybas' : 'Pratybos baigtos - prasidės žaidimas'}
+                      </p>
+                    </div>
+                  ) : (
+                    lastScoreAward !== null && (
+                      <div className="mb-8 bg-black/5 p-4 rounded-2xl">
+                        <p className="text-[#4a3728] font-bold uppercase tracking-widest text-sm">Taškai už užduotį</p>
+                        <p className="text-4xl font-black text-[#2c1e14]">+{lastScoreAward}</p>
+                      </div>
+                    )
+                  )}
+                  <button 
+                    ref={nextButtonRef} 
+                    onClick={isPracticeMode ? nextPracticeSpell : nextTeamLevel} 
+                    className="wizard-font bg-[#2c1e14] text-[#f4e4bc] px-24 py-8 rounded-full text-5xl font-black shadow-2xl hover:scale-110 active:scale-95 transition-all"
+                  >
+                    {isPracticeMode && practiceSpellsCompleted + 1 >= 3 ? 'PRADĖTI ŽAIDIMĄ' : 'TOLIAU'}
+                  </button>
+                  <p className="mt-8 text-xl font-bold italic text-[#4a3728] animate-pulse">Sujunkite pirštus virš mygtuko</p>
+                </div>
+              </div>
+            )}
+
+            {!isLevelSuccess && (
+              <div className="absolute bottom-10 inset-x-0 flex flex-col items-center gap-4">
+                <div className="w-[450px] h-5 bg-black/80 rounded-full border-2 border-[#d4af37]/30 overflow-hidden shadow-inner">
+                  <div className="h-full bg-gradient-to-r from-amber-600 via-white to-amber-600 transition-all duration-300 shadow-[0_0_20px_rgba(255,215,0,0.5)]" style={{ width: `${magicIntensity}%` }} />
+                </div>
+                <div className="bg-black/90 px-12 py-3 rounded-full border-2 border-[#d4af37] text-2xl font-bold italic shadow-2xl text-white tracking-widest wizard-font">
+                  {statusMessage}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {gameState === GameState.TEAM_RESULTS && teamSession && (
+        <TeamResults
+          session={teamSession}
+          onPlayAgain={() => {
+            setTeamSession(null);
+            setCurrentTeamPlayer(null);
+            setGameState(GameState.TEAM_SETUP);
+          }}
+          onBackToMenu={() => {
+            setTeamSession(null);
+            setCurrentTeamPlayer(null);
+            setGameMode('solo');
+            setGameState(GameState.MODE_SELECT);
+          }}
+        />
+      )}
+
       {gameState === GameState.RESULTS && (
         <div className="z-20 parchment p-16 rounded-[5rem] text-center max-w-3xl border-[16px] border-double border-[#4a3728] shadow-2xl animate-in zoom-in duration-700">
           <h2 className="wizard-font text-6xl font-bold mb-10 text-[#2c1e14]">DVIKOVA BAIGTA</h2>
           <div className="mb-14">
-            <p className="text-[10rem] font-black text-[#2c1e14] leading-none drop-shadow-lg">{players[0].score}</p>
-            <p className="text-3xl mt-6 font-bold text-[#4a3728]">Išburta {currentLevel - 1} lygių</p>
+            <div className="mb-10">
+              <p className="text-3xl mt-6 font-bold text-[#4a3728]">Išburta {currentLevel - 1} lygių</p>
+            </div>
+            <div className="grid gap-4">
+              {[...players]
+                .sort((a, b) => b.score - a.score)
+                .map((p, idx) => (
+                  <div key={p.id} className="flex items-center justify-between bg-black/5 rounded-3xl px-8 py-4 border border-[#4a3728]/20">
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-full bg-[#2c1e14] text-white flex items-center justify-center font-black">{idx + 1}</div>
+                      <div className="text-left">
+                        <div className="font-black text-[#2c1e14] text-2xl">{p.name}</div>
+                        <div className="text-sm font-bold text-[#4a3728] uppercase tracking-widest">Taškai</div>
+                      </div>
+                    </div>
+                    <div className="text-4xl font-black text-[#2c1e14] tabular-nums">{p.score}</div>
+                  </div>
+                ))}
+            </div>
           </div>
           <button onClick={startGame} className="wizard-font bg-[#2c1e14] text-white px-20 py-8 rounded-full text-4xl font-black shadow-2xl hover:scale-110 active:scale-95 transition-all">BANDYTI DAR KARTĄ</button>
         </div>

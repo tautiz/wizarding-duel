@@ -50,17 +50,7 @@ export interface EnhancedSpell extends Spell {
 
 export const SPELLS: EnhancedSpell[] = [
   // --- PUOLAMIEJI ---
-  {
-    id: 'avada-kedavra',
-    name: 'Avada Kedavra',
-    incantation: 'Avada Kedavra',
-    description: 'Nubrėžk mirtiną žaibą ekrane!',
-    gestureDescription: 'MIRTINAS ŽAIBAS!',
-    color: '#2ecc71',
-    difficulty: 3,
-    gesturePath: 'M 20 20 L 80 20 L 20 80 L 80 80',
-    waypoints: [{ x: 25, y: 20 }, { x: 50, y: 20 }, { x: 75, y: 20 }, { x: 50, y: 50 }, { x: 25, y: 80 }, { x: 50, y: 80 }, { x: 75, y: 80 }]
-  },
+
   {
     id: 'expelliarmus',
     name: 'Expelliarmus',
@@ -94,7 +84,17 @@ export const SPELLS: EnhancedSpell[] = [
     gesturePath: 'M 80 50 A 30 30 0 1 1 50 20 A 20 20 0 1 1 50 40',
     waypoints: [{ x: 80, y: 50 }, { x: 50, y: 80 }, { x: 20, y: 50 }, { x: 50, y: 20 }, { x: 70, y: 50 }, { x: 50, y: 65 }]
   },
-
+  {
+    id: 'avada-kedavra',
+    name: 'Avada Kedavra',
+    incantation: 'Avada Kedavra',
+    description: 'Nubrėžk mirtiną žaibą ekrane!',
+    gestureDescription: 'MIRTINAS ŽAIBAS!',
+    color: '#2ecc71',
+    difficulty: 3,
+    gesturePath: 'M 20 20 L 80 20 L 20 80 L 80 80',
+    waypoints: [{ x: 25, y: 20 }, { x: 50, y: 20 }, { x: 75, y: 20 }, { x: 50, y: 50 }, { x: 25, y: 80 }, { x: 50, y: 80 }, { x: 75, y: 80 }]
+  },
   // --- GYNYBINIAI ---
   {
     id: 'protego',
