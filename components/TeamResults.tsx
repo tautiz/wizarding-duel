@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { TeamSession } from '../models/TeamGameState';
 import { storageService } from '../services/storageService';
 
@@ -13,6 +13,8 @@ export const TeamResults: React.FC<TeamResultsProps> = ({
   onPlayAgain, 
   onBackToMenu 
 }) => {
+  const [actionsUnlocked, setActionsUnlocked] = useState(false);
+
   useEffect(() => {
     const finalSession = {
       ...session,
@@ -20,6 +22,25 @@ export const TeamResults: React.FC<TeamResultsProps> = ({
     };
     storageService.saveTeamSession(finalSession);
   }, [session]);
+
+  useEffect(() => {
+    setActionsUnlocked(false);
+  }, [session.id]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLElement) {
+        const tag = e.target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      }
+      if (e.key === 'Enter') {
+        if (e.repeat) return;
+        setActionsUnlocked(true);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   const sortedPlayers = [...session.players].sort((a, b) => b.score - a.score);
   const bestPlayer = sortedPlayers[0];
@@ -104,20 +125,33 @@ export const TeamResults: React.FC<TeamResultsProps> = ({
         </div>
       </div>
 
-      <div className="flex gap-6 justify-center">
-        <button
-          onClick={onBackToMenu}
-          className="px-12 py-6 rounded-full border-4 border-[#4a3728] bg-white/50 text-[#2c1e14] wizard-font font-black text-2xl hover:bg-white/80 transition-all hover:scale-105 active:scale-95"
-        >
-          MENIU
-        </button>
-        <button
-          onClick={onPlayAgain}
-          className="wizard-font bg-[#2c1e14] text-white px-20 py-6 rounded-full text-3xl font-black shadow-2xl hover:scale-110 active:scale-95 transition-all border-4 border-[#d4af37]"
-        >
-          ŽAISTI DAR KARTĄ
-        </button>
-      </div>
+      {!actionsUnlocked ? (
+        <div className="flex flex-col items-center gap-3">
+          <div className="bg-black/10 px-10 py-4 rounded-3xl border-2 border-[#4a3728]/30">
+            <p className="text-[#2c1e14] font-black text-xl wizard-font">
+              Spauskite ENTER, kad būtų rodomi veiksmai
+            </p>
+            <p className="text-[#4a3728] font-bold text-sm mt-1 uppercase tracking-widest">
+              MENIU / ŽAISTI DAR KARTĄ
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="flex gap-6 justify-center">
+          <button
+            onClick={onBackToMenu}
+            className="px-12 py-6 rounded-full border-4 border-[#4a3728] bg-white/50 text-[#2c1e14] wizard-font font-black text-2xl hover:bg-white/80 transition-all hover:scale-105 active:scale-95"
+          >
+            MENIU
+          </button>
+          <button
+            onClick={onPlayAgain}
+            className="wizard-font bg-[#2c1e14] text-white px-20 py-6 rounded-full text-3xl font-black shadow-2xl hover:scale-110 active:scale-95 transition-all border-4 border-[#d4af37]"
+          >
+            ŽAISTI DAR KARTĄ
+          </button>
+        </div>
+      )}
     </div>
   );
 };
