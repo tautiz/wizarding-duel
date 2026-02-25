@@ -7,11 +7,13 @@ class TeamGameService {
     playerCount: number,
     totalTime: number,
     difficulty: string,
-    playerNames: string[]
+    playerNames: string[],
+    collegeId: string
   ): TeamSession {
     const timePerPlayer = this.calculateTimePerPlayer(totalTime, playerCount);
     const session: TeamSession = {
       id: `team_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      collegeId,
       players: playerNames.map((name, idx) => createTeamPlayer(idx + 1, name)),
       totalTimeLimit: totalTime,
       timePerPlayer,
@@ -124,6 +126,9 @@ class TeamGameService {
     };
 
     storageService.updateTeamSession(session.id, finalSession);
+    if (finalSession.collegeId) {
+      storageService.lockCollege(finalSession.collegeId);
+    }
     return finalSession;
   }
 

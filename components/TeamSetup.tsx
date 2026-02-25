@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { VoiceInput } from './VoiceInput';
-import { DIFFICULTIES } from '../constants';
+import { COLLEGES, DIFFICULTIES } from '../constants';
+import { storageService } from '../services/storageService';
 
 interface TeamSetupProps {
-  onStartTeam: (playerNames: string[], totalTime: number, difficulty: string) => void;
+  onStartTeam: (playerNames: string[], totalTime: number, difficulty: string, collegeId: string) => void;
   onBack: () => void;
 }
 
@@ -11,6 +12,7 @@ export const TeamSetup: React.FC<TeamSetupProps> = ({ onStartTeam, onBack }) => 
   const [playerCount, setPlayerCount] = useState(2);
   const [totalTime, setTotalTime] = useState(300);
   const [difficulty, setDifficulty] = useState('medium');
+  const [collegeId, setCollegeId] = useState<string>('');
   const [playerNames, setPlayerNames] = useState<string[]>([]);
 
   const handleNameReceived = (index: number, name: string) => {
@@ -27,11 +29,12 @@ export const TeamSetup: React.FC<TeamSetupProps> = ({ onStartTeam, onBack }) => 
   };
 
   const allNamesEntered = playerNames.filter(n => n && n.trim()).length === playerCount;
+  const isCollegeSelected = Boolean(collegeId);
   const timePerPlayer = Math.floor(totalTime / playerCount);
 
   const handleStart = () => {
-    if (allNamesEntered) {
-      onStartTeam(playerNames.filter(n => n && n.trim()), totalTime, difficulty);
+    if (allNamesEntered && isCollegeSelected) {
+      onStartTeam(playerNames.filter(n => n && n.trim()), totalTime, difficulty, collegeId);
     }
   };
 
@@ -51,6 +54,38 @@ export const TeamSetup: React.FC<TeamSetupProps> = ({ onStartTeam, onBack }) => 
       </div>
 
       <div className="grid grid-cols-2 gap-4 mb-4">
+        <div className="bg-black/10 p-4 rounded-2xl border border-[#4a3728]/20">
+          <h3 className="font-bold mb-3 text-lg font-serif text-[#2c1e14]">KOLEDŽAS</h3>
+          <div className="grid grid-cols-2 gap-2">
+            {COLLEGES.map(c => {
+              const locked = storageService.isCollegeLocked(c.id);
+              const selected = collegeId === c.id;
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => !locked && setCollegeId(c.id)}
+                  disabled={locked}
+                  className={`py-2 rounded-lg font-bold border-2 transition-all text-sm ${
+                    locked
+                      ? 'bg-white/30 text-[#2c1e14]/40 border-transparent cursor-not-allowed'
+                      : selected
+                        ? 'bg-[#2c1e14] text-white border-[#d4af37]'
+                        : 'bg-white/50 text-[#2c1e14] border-transparent hover:bg-white/80'
+                  }`}
+                >
+                  {c.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {!isCollegeSelected && (
+            <div className="mt-3 text-center text-xs text-[#4a3728] italic">
+              Pasirinkite koledžą, kad galėtumėte pradėti
+            </div>
+          )}
+        </div>
+
         <div className="bg-black/10 p-4 rounded-2xl border border-[#4a3728]/20">
           <h3 className="font-bold mb-3 text-lg font-serif text-[#2c1e14]">LYGIS</h3>
           <div className="flex flex-col gap-2">
@@ -141,10 +176,10 @@ export const TeamSetup: React.FC<TeamSetupProps> = ({ onStartTeam, onBack }) => 
 
       <button
         onClick={handleStart}
-        disabled={!allNamesEntered}
+        disabled={!allNamesEntered || !isCollegeSelected}
         className="w-full wizard-font bg-[#2c1e14] text-white py-4 rounded-full text-2xl font-black shadow-xl hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
       >
-        {allNamesEntered ? 'PRADĖTI DVIKOVĄ' : 'ĮVESKITE VARDUS'}
+        {allNamesEntered && isCollegeSelected ? 'PRADĖTI DVIKOVĄ' : 'UŽPILDYKITE REGISTRACIJĄ'}
       </button>
     </div>
   );

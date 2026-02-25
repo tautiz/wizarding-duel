@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
 import { GameState, Player, GameConfig, WIZARD_NAMES } from './types';
-import { SPELLS, SYSTEM_INSTRUCTION, SOUNDS, EnhancedSpell, getToleranceForDifficulty, DIFFICULTIES, DEFAULT_DIFFICULTY_ID, getDifficultyConfig, SPELL_PATH_VISUALS } from './constants';
+import { COLLEGES, SPELLS, SYSTEM_INSTRUCTION, SOUNDS, EnhancedSpell, getToleranceForDifficulty, DIFFICULTIES, DEFAULT_DIFFICULTY_ID, getDifficultyConfig, SPELL_PATH_VISUALS } from './constants';
 import { MagicEffect } from './components/MagicEffect';
 import { SpellGuide } from './components/SpellGuide';
 import { TrackingOverlay } from './components/TrackingOverlay';
@@ -44,6 +44,9 @@ const App: React.FC = () => {
   const [debugPaused, setDebugPaused] = useState(false);
   const [debugShowHand, setDebugShowHand] = useState(false);
   const [debugPathLineWidthPx, setDebugPathLineWidthPx] = useState<number>(SPELL_PATH_VISUALS.lineWidthPx);
+  const [debugAdminOpen, setDebugAdminOpen] = useState(false);
+  const [adminRefreshKey, setAdminRefreshKey] = useState(0);
+  const [adminDate, setAdminDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [showSystemCursor, setShowSystemCursor] = useState(false);
   const [debugSpellId, setDebugSpellId] = useState<string>(SPELLS[0].id);
   const [debugLevelInput, setDebugLevelInput] = useState<string>('1');
@@ -316,12 +319,14 @@ const App: React.FC = () => {
     });
 
     const nextScore = player.score + scoreToAdd;
-    setCurrentTeamPlayer(prev => prev ? { ...prev, score: nextScore } : null);
+    const nextLevels = player.levelsCompleted + 1;
+
+    setCurrentTeamPlayer(prev => prev ? { ...prev, score: nextScore, levelsCompleted: nextLevels } : null);
     setTeamSession(prev => {
       if (!prev) return prev;
       return {
         ...prev,
-        players: prev.players.map(p => (p.id === player.id ? { ...p, score: nextScore } : p)),
+        players: prev.players.map(p => (p.id === player.id ? { ...p, score: nextScore, levelsCompleted: nextLevels } : p)),
       };
     });
     setLastScoreAward(scoreToAdd);
@@ -581,6 +586,95 @@ const App: React.FC = () => {
     playSound('swish');
   };
 
+  const handleAdminPrint = () => {
+    const targetDate = adminDate;
+    const sessions = storageService.getAllTeamSessions().filter(s => s.completedAt);
+
+    const sameDay = (d: Date) => {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    };
+
+    const daySessions = sessions.filter(s => {
+      const completed = s.completedAt ? new Date(s.completedAt) : null;
+      if (!completed) return false;
+      return sameDay(completed) === targetDate;
+    });
+
+    const byCollege = new Map<string, { sessionsPlayed: number; totalScore: number; bestScore: number; totalLevels: number }>();
+    daySessions.forEach(s => {
+      const key = s.collegeId || 'unknown';
+      const prev = byCollege.get(key) ?? { sessionsPlayed: 0, totalScore: 0, bestScore: 0, totalLevels: 0 };
+      const totalLevels = s.players.reduce((sum, p) => sum + (p.levelsCompleted ?? 0), 0);
+      byCollege.set(key, {
+        sessionsPlayed: prev.sessionsPlayed + 1,
+        totalScore: prev.totalScore + (s.totalScore ?? 0),
+        bestScore: Math.max(prev.bestScore, s.totalScore ?? 0),
+        totalLevels: prev.totalLevels + totalLevels,
+      });
+    });
+
+    const rows = [...byCollege.entries()]
+      .map(([collegeId, v]) => {
+        const label = COLLEGES.find(c => c.id === collegeId)?.label ?? collegeId;
+        return `<tr>
+          <td>${label}</td>
+          <td style="text-align:right">${v.sessionsPlayed}</td>
+          <td style="text-align:right">${v.totalScore}</td>
+          <td style="text-align:right">${v.bestScore}</td>
+          <td style="text-align:right">${v.totalLevels}</td>
+        </tr>`;
+      })
+      .join('');
+
+    const html = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Wizarding Duel – Koledžų statistika (${targetDate})</title>
+    <style>
+      body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; padding: 24px; color: #111; }
+      h1 { font-size: 18px; margin: 0 0 12px; }
+      .meta { color: #444; font-size: 12px; margin-bottom: 16px; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { border-bottom: 1px solid #ddd; padding: 8px 6px; font-size: 12px; }
+      th { text-align: left; background: #f5f5f5; }
+      .empty { color: #666; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <h1>Koledžų statistika – ${targetDate}</h1>
+    <div class="meta">Sesijų: ${daySessions.length}</div>
+    ${rows.length > 0 ? `
+      <table>
+        <thead>
+          <tr>
+            <th>Koledžas</th>
+            <th style="text-align:right">Sesijos</th>
+            <th style="text-align:right">Suma</th>
+            <th style="text-align:right">Geriausias</th>
+            <th style="text-align:right">Lygiai</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows}
+        </tbody>
+      </table>
+    ` : `<div class="empty">Nėra užbaigtų sesijų pasirinktai dienai.</div>`}
+  </body>
+</html>`;
+
+    const w = window.open('', '_blank');
+    if (!w) return;
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+    w.focus();
+    w.print();
+  };
+
   const nextLvl = () => {
     setIsLevelSuccess(false);
     setLastScoreAward(null);
@@ -726,12 +820,13 @@ const App: React.FC = () => {
 
     const playerInSession = session.players.find(p => p.id === player.id);
     const finalScore = playerInSession?.score ?? player.score;
+    const finalLevelsCompleted = playerInSession?.levelsCompleted ?? player.levelsCompleted;
 
     const updatedSession = teamGameService.endPlayerGame(
       session,
       player.id,
       finalScore,
-      currentLevel - 1
+      finalLevelsCompleted
     );
     setTeamSession(updatedSession);
 
@@ -750,8 +845,8 @@ const App: React.FC = () => {
     }
   }, [currentLevel]);
 
-  const startTeamGame = (playerNames: string[], totalTime: number, difficulty: string) => {
-    const session = teamGameService.createTeamSession(playerNames.length, totalTime, difficulty, playerNames);
+  const startTeamGame = (playerNames: string[], totalTime: number, difficulty: string, collegeId: string) => {
+    const session = teamGameService.createTeamSession(playerNames.length, totalTime, difficulty, playerNames, collegeId);
     setTeamSession(session);
     setConfig(prev => ({ ...prev, difficulty }));
     setGameMode('team');
@@ -878,7 +973,17 @@ const App: React.FC = () => {
     });
     setLastScoreAward(scoreToAdd);
     
-    setCurrentTeamPlayer(prev => prev ? { ...prev, score: prev.score + scoreToAdd } : null);
+    const nextScore = currentTeamPlayer.score + scoreToAdd;
+    const nextLevels = currentTeamPlayer.levelsCompleted + 1;
+
+    setCurrentTeamPlayer(prev => prev ? { ...prev, score: nextScore, levelsCompleted: nextLevels } : null);
+    setTeamSession(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        players: prev.players.map(p => (p.id === currentTeamPlayer.id ? { ...p, score: nextScore, levelsCompleted: nextLevels } : p)),
+      };
+    });
     
     setActiveEffects({ p1: true, p2: false });
     setStatusMessage("GRANDINĖ UŽBAIGTA!");
@@ -924,6 +1029,13 @@ const App: React.FC = () => {
               className="w-full mb-3 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 text-sm font-bold"
             >
               Hand overlay: {debugShowHand ? 'ON' : 'OFF'}
+            </button>
+
+            <button
+              onClick={() => setDebugAdminOpen(true)}
+              className="w-full mb-3 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 text-sm font-bold"
+            >
+              Admin stats
             </button>
 
             <div className="mb-3">
@@ -1043,6 +1155,160 @@ const App: React.FC = () => {
 
             <div className="mt-3 text-[11px] font-mono text-white/60">
               Press <span className="text-white">D</span> to toggle debug.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {debugMode && debugAdminOpen && (
+        <div className="fixed inset-0 z-[9999] pointer-events-auto" key={adminRefreshKey}>
+          <div
+            className="absolute inset-0 bg-black/70"
+            onClick={() => setDebugAdminOpen(false)}
+          />
+          <div className="absolute inset-6 md:inset-10 bg-black/80 backdrop-blur-md border border-white/10 rounded-3xl text-white overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
+              <div className="font-mono font-bold text-amber-200">ADMIN STATS (localStorage)</div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    storageService.unlockAllColleges();
+                    setAdminRefreshKey(k => k + 1);
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 text-sm font-bold"
+                >
+                  Atrakinti visus
+                </button>
+                <button
+                  onClick={() => setDebugAdminOpen(false)}
+                  className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 text-sm font-bold"
+                >
+                  Uždaryti
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              <div className="flex flex-wrap items-end justify-between gap-4">
+                <div>
+                  <div className="text-xs font-bold uppercase tracking-widest text-white/70 mb-2">Dienos ataskaita</div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="date"
+                      value={adminDate}
+                      onChange={(e) => setAdminDate(e.target.value)}
+                      className="bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-sm font-mono outline-none"
+                    />
+                    <button
+                      onClick={handleAdminPrint}
+                      className="px-4 py-2 rounded-xl bg-amber-500/30 hover:bg-amber-500/40 border border-amber-400/30 text-sm font-black uppercase tracking-widest text-amber-100"
+                    >
+                      Spausdinti
+                    </button>
+                  </div>
+                </div>
+                <div className="text-xs font-mono text-white/60">
+                  Tip: spausdinimas filtruoja pagal <span className="text-white">completedAt</span> datą.
+                </div>
+              </div>
+
+              <div>
+                <div className="text-xs font-bold uppercase tracking-widest text-white/70 mb-2">Koledžų suvestinės</div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm font-mono">
+                    <thead>
+                      <tr className="text-white/70">
+                        <th className="text-left py-2">Koledžas</th>
+                        <th className="text-right py-2">Sesijos</th>
+                        <th className="text-right py-2">Suma</th>
+                        <th className="text-right py-2">Geriausias</th>
+                        <th className="text-right py-2">Paskutinį kartą</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/10">
+                      {storageService.getCollegeSummaries().map(s => {
+                        const label = COLLEGES.find(c => c.id === s.collegeId)?.label ?? s.collegeId;
+                        const lastPlayed = s.lastPlayedAt ? new Date(s.lastPlayedAt).toLocaleString('lt-LT') : '-';
+                        return (
+                          <tr key={s.collegeId}>
+                            <td className="py-2">{label}</td>
+                            <td className="py-2 text-right">{s.sessionsPlayed}</td>
+                            <td className="py-2 text-right">{s.totalScore}</td>
+                            <td className="py-2 text-right">{s.bestScore}</td>
+                            <td className="py-2 text-right">{lastPlayed}</td>
+                          </tr>
+                        );
+                      })}
+                      {storageService.getCollegeSummaries().length === 0 && (
+                        <tr>
+                          <td className="py-3 text-white/60" colSpan={5}>Nėra užbaigtų komandos sesijų.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div>
+                <div className="text-xs font-bold uppercase tracking-widest text-white/70 mb-2">Užrakinti koledžai</div>
+                <div className="flex flex-wrap gap-2">
+                  {storageService.getLockedColleges().map(id => {
+                    const label = COLLEGES.find(c => c.id === id)?.label ?? id;
+                    return (
+                      <span key={id} className="flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 border border-white/10 text-sm font-mono">
+                        <span>{label}</span>
+                        <button
+                          onClick={() => {
+                            storageService.unlockCollege(id);
+                            setAdminRefreshKey(k => k + 1);
+                          }}
+                          className="px-2 py-0.5 rounded-lg bg-white/10 hover:bg-white/20 border border-white/10 text-[11px] font-bold"
+                        >
+                          Atrakinti
+                        </button>
+                      </span>
+                    );
+                  })}
+                  {storageService.getLockedColleges().length === 0 && (
+                    <div className="text-sm font-mono text-white/60">Nėra užrakintų koledžų.</div>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-xs font-bold uppercase tracking-widest text-white/70 mb-2">Paskutinės komandos sesijos</div>
+                <div className="space-y-2">
+                  {[...storageService.getAllTeamSessions()]
+                    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                    .slice(0, 10)
+                    .map(sess => {
+                      const collegeLabel = sess.collegeId ? (COLLEGES.find(c => c.id === sess.collegeId)?.label ?? sess.collegeId) : '-';
+                      const created = sess.createdAt ? new Date(sess.createdAt).toLocaleString('lt-LT') : '-';
+                      const completed = sess.completedAt ? new Date(sess.completedAt).toLocaleString('lt-LT') : '-';
+                      const totalLevels = sess.players.reduce((sum, p) => sum + (p.levelsCompleted ?? 0), 0);
+                      return (
+                        <div key={sess.id} className="p-3 rounded-2xl bg-white/5 border border-white/10">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="font-mono font-bold">{sess.id}</div>
+                            <div className="text-white/70 font-mono text-xs">{collegeLabel}</div>
+                          </div>
+                          <div className="mt-1 text-xs font-mono text-white/70">
+                            Sukurta: {created} | Užbaigta: {completed}
+                          </div>
+                          <div className="mt-2 grid grid-cols-3 gap-2 text-xs font-mono">
+                            <div className="bg-black/30 border border-white/10 rounded-xl px-2 py-1">Score: <span className="text-white font-bold">{sess.totalScore ?? 0}</span></div>
+                            <div className="bg-black/30 border border-white/10 rounded-xl px-2 py-1">Lygiai: <span className="text-white font-bold">{totalLevels}</span></div>
+                            <div className="bg-black/30 border border-white/10 rounded-xl px-2 py-1">Žaidėjai: <span className="text-white font-bold">{sess.players.length}</span></div>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                  {storageService.getAllTeamSessions().length === 0 && (
+                    <div className="text-sm font-mono text-white/60">Nėra komandos sesijų.</div>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>

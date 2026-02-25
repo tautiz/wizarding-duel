@@ -3,6 +3,7 @@ import { TeamSession, SoloResult } from '../models/TeamGameState';
 class StorageService {
   private static readonly TEAM_SESSIONS_KEY = 'wd_team_sessions';
   private static readonly SOLO_RESULTS_KEY = 'wd_solo_results';
+  private static readonly LOCKED_COLLEGES_KEY = 'wd_locked_colleges';
   private static readonly MAX_TEAM_SESSIONS = 50;
   private static readonly MAX_SOLO_RESULTS = 100;
   private static readonly MAX_AGE_DAYS = 90;
@@ -109,10 +110,89 @@ class StorageService {
     return results.slice(0, limit);
   }
 
+  getLockedColleges(): string[] {
+    try {
+      const data = localStorage.getItem(StorageService.LOCKED_COLLEGES_KEY);
+      if (!data) return [];
+      const ids = JSON.parse(data) as string[];
+      return Array.isArray(ids) ? ids : [];
+    } catch {
+      return [];
+    }
+  }
+
+  lockCollege(collegeId: string): void {
+    try {
+      const locked = new Set(this.getLockedColleges());
+      locked.add(collegeId);
+      localStorage.setItem(StorageService.LOCKED_COLLEGES_KEY, JSON.stringify([...locked]));
+    } catch (error) {
+      console.error('Failed to lock college:', error);
+    }
+  }
+
+  unlockCollege(collegeId: string): void {
+    try {
+      const locked = new Set(this.getLockedColleges());
+      locked.delete(collegeId);
+      localStorage.setItem(StorageService.LOCKED_COLLEGES_KEY, JSON.stringify([...locked]));
+    } catch (error) {
+      console.error('Failed to unlock college:', error);
+    }
+  }
+
+  unlockAllColleges(): void {
+    try {
+      localStorage.setItem(StorageService.LOCKED_COLLEGES_KEY, JSON.stringify([]));
+    } catch (error) {
+      console.error('Failed to unlock all colleges:', error);
+    }
+  }
+
+  isCollegeLocked(collegeId: string): boolean {
+    return this.getLockedColleges().includes(collegeId);
+  }
+
+  getCollegeSummaries(): Array<{
+    collegeId: string;
+    sessionsPlayed: number;
+    totalScore: number;
+    bestScore: number;
+    lastPlayedAt?: Date;
+  }> {
+    const sessions = this.getAllTeamSessions().filter(s => s.completedAt);
+
+    const map = new Map<string, {
+      sessionsPlayed: number;
+      totalScore: number;
+      bestScore: number;
+      lastPlayedAt?: Date;
+    }>();
+
+    sessions.forEach(s => {
+      const key = s.collegeId || 'unknown';
+      const prev = map.get(key) ?? { sessionsPlayed: 0, totalScore: 0, bestScore: 0, lastPlayedAt: undefined };
+      const playedAt = s.completedAt ? new Date(s.completedAt) : undefined;
+      const lastPlayedAt = !prev.lastPlayedAt || (playedAt && playedAt > prev.lastPlayedAt) ? playedAt : prev.lastPlayedAt;
+
+      map.set(key, {
+        sessionsPlayed: prev.sessionsPlayed + 1,
+        totalScore: prev.totalScore + (s.totalScore ?? 0),
+        bestScore: Math.max(prev.bestScore, s.totalScore ?? 0),
+        lastPlayedAt,
+      });
+    });
+
+    return [...map.entries()]
+      .map(([collegeId, v]) => ({ collegeId, ...v }))
+      .sort((a, b) => b.bestScore - a.bestScore);
+  }
+
   clearAllData(): void {
     try {
       localStorage.removeItem(StorageService.TEAM_SESSIONS_KEY);
       localStorage.removeItem(StorageService.SOLO_RESULTS_KEY);
+      localStorage.removeItem(StorageService.LOCKED_COLLEGES_KEY);
     } catch (error) {
       console.error('Failed to clear data:', error);
     }

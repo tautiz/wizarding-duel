@@ -14,6 +14,7 @@ export interface TeamGameState {
 export interface TeamSession {
   id: string;
   teamName?: string;
+  collegeId: string;
   players: TeamPlayer[];
   totalTimeLimit: number;
   timePerPlayer: number;
@@ -39,6 +40,7 @@ export const createTeamSession = (
 ): TeamSession => ({
   id: `team_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
   players: [],
+  collegeId: 'unknown',
   totalTimeLimit: totalTime,
   timePerPlayer: Math.floor(totalTime / playerCount),
   totalScore: 0,

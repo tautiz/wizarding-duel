@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { TeamSession } from '../models/TeamGameState';
-import { storageService } from '../services/storageService';
 
 interface TeamResultsProps {
   session: TeamSession;
@@ -14,14 +13,6 @@ export const TeamResults: React.FC<TeamResultsProps> = ({
   onBackToMenu 
 }) => {
   const [actionsUnlocked, setActionsUnlocked] = useState(false);
-
-  useEffect(() => {
-    const finalSession = {
-      ...session,
-      completedAt: new Date(),
-    };
-    storageService.saveTeamSession(finalSession);
-  }, [session]);
 
   useEffect(() => {
     setActionsUnlocked(false);

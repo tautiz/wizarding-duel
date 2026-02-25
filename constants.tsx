@@ -62,6 +62,13 @@ export const SPELL_PATH_VISUALS = {
   startArrowPulseSpeedHz: 1.2,
 } as const;
 
+export const COLLEGES = [
+  { id: 'gryffindor', label: 'Grifų Gūžta', color: '#b91c1c' },
+  { id: 'slytherin', label: 'Klastūnynas', color: '#166534' },
+  { id: 'ravenclaw', label: 'Varnanagiai', color: '#1d4ed8' },
+  { id: 'hufflepuff', label: 'Švilpynė', color: '#a16207' },
+] as const;
+
 export interface EnhancedSpell extends Spell {
   waypoints: Waypoint[];
 }
