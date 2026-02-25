@@ -1191,9 +1191,7 @@ const App: React.FC = () => {
                 </div>
               </div>
             )}
-            <div className="absolute top-10 left-10 scale-75 origin-top-left"> 
-              {!isLevelSuccess && <SpellGuide spell={activeSpell} />} 
-            </div>
+
             <MagicEffect side="left" active={activeEffects.p1} color={activeSpell.color} spellId={activeSpell.id} />
             
             {isLevelSuccess && (
@@ -1212,16 +1210,6 @@ const App: React.FC = () => {
               </div>
             )}
 
-            {!isLevelSuccess && (
-              <div className="absolute bottom-10 inset-x-0 flex flex-col items-center gap-4">
-                 <div className="w-[450px] h-5 bg-black/80 rounded-full border-2 border-[#d4af37]/30 overflow-hidden shadow-inner">
-                    <div className="h-full bg-gradient-to-r from-amber-600 via-white to-amber-600 transition-all duration-300 shadow-[0_0_20px_rgba(255,215,0,0.5)]" style={{ width: `${magicIntensity}%` }} />
-                 </div>
-                 <div className="bg-black/90 px-12 py-3 rounded-full border-2 border-[#d4af37] text-2xl font-bold italic shadow-2xl text-white tracking-widest wizard-font">
-                  {statusMessage}
-                 </div>
-              </div>
-            )}
           </div>
         </div>
       )}
@@ -1302,9 +1290,6 @@ const App: React.FC = () => {
               </div>
             )}
 
-            <div className="absolute top-10 left-10 scale-75 origin-top-left">
-              {!isLevelSuccess && <SpellGuide spell={activeSpell} />}
-            </div>
             <MagicEffect side="left" active={activeEffects.p1} color={activeSpell.color} spellId={activeSpell.id} />
             
             {isLevelSuccess && !showPracticeOverlay && (
@@ -1335,17 +1320,6 @@ const App: React.FC = () => {
                     {isPracticeMode && practiceSpellsCompleted + 1 >= 3 ? 'PRADĖTI ŽAIDIMĄ' : 'TOLIAU'}
                   </button>
                   <p className="mt-8 text-xl font-bold italic text-[#4a3728] animate-pulse">Sujunkite pirštus virš mygtuko</p>
-                </div>
-              </div>
-            )}
-
-            {!isLevelSuccess && (
-              <div className="absolute bottom-10 inset-x-0 flex flex-col items-center gap-4">
-                <div className="w-[450px] h-5 bg-black/80 rounded-full border-2 border-[#d4af37]/30 overflow-hidden shadow-inner">
-                  <div className="h-full bg-gradient-to-r from-amber-600 via-white to-amber-600 transition-all duration-300 shadow-[0_0_20px_rgba(255,215,0,0.5)]" style={{ width: `${magicIntensity}%` }} />
-                </div>
-                <div className="bg-black/90 px-12 py-3 rounded-full border-2 border-[#d4af37] text-2xl font-bold italic shadow-2xl text-white tracking-widest wizard-font">
-                  {statusMessage}
                 </div>
               </div>
             )}
