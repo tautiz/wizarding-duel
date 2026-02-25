@@ -44,6 +44,24 @@ export const getToleranceForDifficulty = (difficultyId: string) => {
   return getDifficultyConfig(difficultyId).tolerance;
 };
 
+export const SPELL_PATH_VISUALS = {
+  lineWidthPx: 30,
+  outlineWidthPx: 2,
+  lineColor: 'rgba(212, 175, 55, 0.18)',
+  outlineColor: 'rgba(0, 0, 0, 0.28)',
+
+  flowColor: 'rgba(255, 255, 255, 0.12)',
+  flowDashLengthPx: 14,
+  flowDashGapPx: 16,
+  flowSpeedPxPerSecond: 60,
+
+  startArrowColor: 'rgba(212, 175, 55, 0.85)',
+  startArrowOutlineColor: 'rgba(0, 0, 0, 0.55)',
+  startArrowSizePx: 18,
+  startArrowPulseAmplitude: 0.18,
+  startArrowPulseSpeedHz: 1.2,
+} as const;
+
 export interface EnhancedSpell extends Spell {
   waypoints: Waypoint[];
 }

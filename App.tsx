@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
 import { GameState, Player, GameConfig, WIZARD_NAMES } from './types';
-import { SPELLS, SYSTEM_INSTRUCTION, SOUNDS, EnhancedSpell, getToleranceForDifficulty, DIFFICULTIES, DEFAULT_DIFFICULTY_ID, getDifficultyConfig } from './constants';
+import { SPELLS, SYSTEM_INSTRUCTION, SOUNDS, EnhancedSpell, getToleranceForDifficulty, DIFFICULTIES, DEFAULT_DIFFICULTY_ID, getDifficultyConfig, SPELL_PATH_VISUALS } from './constants';
 import { MagicEffect } from './components/MagicEffect';
 import { SpellGuide } from './components/SpellGuide';
 import { TrackingOverlay } from './components/TrackingOverlay';
@@ -43,6 +43,7 @@ const App: React.FC = () => {
   const [debugLastDistance, setDebugLastDistance] = useState<number | null>(null);
   const [debugPaused, setDebugPaused] = useState(false);
   const [debugShowHand, setDebugShowHand] = useState(false);
+  const [debugPathLineWidthPx, setDebugPathLineWidthPx] = useState<number>(SPELL_PATH_VISUALS.lineWidthPx);
   const [showSystemCursor, setShowSystemCursor] = useState(false);
   const [debugSpellId, setDebugSpellId] = useState<string>(SPELLS[0].id);
   const [debugLevelInput, setDebugLevelInput] = useState<string>('1');
@@ -925,6 +926,19 @@ const App: React.FC = () => {
               Hand overlay: {debugShowHand ? 'ON' : 'OFF'}
             </button>
 
+            <div className="mb-3">
+              <label className="block text-xs font-bold uppercase tracking-widest text-white/70 mb-1">Path line width: {debugPathLineWidthPx}px</label>
+              <input
+                type="range"
+                min={2}
+                max={30}
+                step={1}
+                value={debugPathLineWidthPx}
+                onChange={(e) => setDebugPathLineWidthPx(Number(e.target.value))}
+                className="w-full"
+              />
+            </div>
+
             <div className="grid grid-cols-2 gap-2 mb-3">
               <button onClick={() => setTimeLeft(t => Math.max(0, t - 5))} className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 text-sm font-bold">-5s</button>
               <button onClick={() => setTimeLeft(t => Math.min(999, t + 5))} className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 text-sm font-bold">+5s</button>
@@ -1149,6 +1163,7 @@ const App: React.FC = () => {
               landmarks={handLandmarks}
               targetSpell={isLevelSuccess ? undefined : activeSpell}
               difficulty={config.difficulty}
+              pathLineWidthPx={debugMode ? debugPathLineWidthPx : undefined}
               debug={debugMode}
               debugShowHand={debugShowHand}
               debugInfo={{
@@ -1250,6 +1265,7 @@ const App: React.FC = () => {
               landmarks={handLandmarks}
               targetSpell={isLevelSuccess ? undefined : activeSpell}
               difficulty={config.difficulty}
+              pathLineWidthPx={debugMode ? debugPathLineWidthPx : undefined}
               debug={debugMode}
               debugShowHand={debugShowHand}
               debugInfo={{

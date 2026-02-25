@@ -1,12 +1,13 @@
 
 import React, { useEffect, useRef } from 'react';
 import { Spell } from '../types';
-import { EnhancedSpell, getToleranceForDifficulty } from '../constants';
+import { EnhancedSpell, getToleranceForDifficulty, SPELL_PATH_VISUALS } from '../constants';
 
 interface TrackingOverlayProps {
   landmarks: any[][];
   targetSpell?: EnhancedSpell;
   difficulty: string;
+  pathLineWidthPx?: number;
   debug?: boolean;
   debugShowHand?: boolean;
   debugInfo?: {
@@ -25,15 +26,17 @@ interface TrackingOverlayProps {
   };
 }
 
-export const TrackingOverlay: React.FC<TrackingOverlayProps> = ({ landmarks, targetSpell, difficulty, debug = false, debugShowHand = false, debugInfo }) => {
+export const TrackingOverlay: React.FC<TrackingOverlayProps> = ({ landmarks, targetSpell, difficulty, pathLineWidthPx, debug = false, debugShowHand = false, debugInfo }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const trailRef = useRef<{x: number, y: number, life: number}[]>([]);
-  const stateRef = useRef({ landmarks, targetSpell, difficulty, debug, debugShowHand, debugInfo });
+  const indicatorRef = useRef<{ x: number; y: number; morphT: number } | null>(null);
+  const lastFrameMsRef = useRef<number | null>(null);
+  const stateRef = useRef({ landmarks, targetSpell, difficulty, pathLineWidthPx, debug, debugShowHand, debugInfo });
 
   // Update logic Ref to keep animation loop clean
   useEffect(() => {
-    stateRef.current = { landmarks, targetSpell, difficulty, debug, debugShowHand, debugInfo };
-  }, [landmarks, targetSpell, difficulty, debug, debugShowHand, debugInfo]);
+    stateRef.current = { landmarks, targetSpell, difficulty, pathLineWidthPx, debug, debugShowHand, debugInfo };
+  }, [landmarks, targetSpell, difficulty, pathLineWidthPx, debug, debugShowHand, debugInfo]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -42,8 +45,13 @@ export const TrackingOverlay: React.FC<TrackingOverlayProps> = ({ landmarks, tar
     if (!ctx) return;
 
     const render = () => {
-      const { landmarks, targetSpell, difficulty, debug, debugShowHand, debugInfo } = stateRef.current;
+      const { landmarks, targetSpell, difficulty, pathLineWidthPx, debug, debugShowHand, debugInfo } = stateRef.current;
       const tolerance = getToleranceForDifficulty(difficulty);
+
+      const nowMs = performance.now();
+      const dtMs = lastFrameMsRef.current === null ? 16 : (nowMs - lastFrameMsRef.current);
+      lastFrameMsRef.current = nowMs;
+      const dt = Math.min(0.05, Math.max(0, dtMs / 1000));
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -57,9 +65,132 @@ export const TrackingOverlay: React.FC<TrackingOverlayProps> = ({ landmarks, tar
         ctx.scale(scaleX, scaleY);
         
         const path = new Path2D(targetSpell.gesturePath);
-        ctx.strokeStyle = 'rgba(212, 175, 55, 0.1)';
-        ctx.lineWidth = 4 / scaleForLineWidth;
+
+        const lineWidthPx = pathLineWidthPx ?? SPELL_PATH_VISUALS.lineWidthPx;
+
+        const flowDashLengthPx = Math.max(6, lineWidthPx * 1.2);
+        const flowDashGapPx = Math.max(8, lineWidthPx * 1.6);
+        const flowSpeedPxPerSecond = Math.max(40, lineWidthPx * 3.2);
+
+        // Flow layer (subtle dashed animation as instruction)
+        ctx.save();
+        ctx.strokeStyle = SPELL_PATH_VISUALS.flowColor;
+        ctx.lineWidth = lineWidthPx / scaleForLineWidth;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.miterLimit = 2;
+        ctx.setLineDash([
+          flowDashLengthPx / scaleForLineWidth,
+          flowDashGapPx / scaleForLineWidth,
+        ]);
+        const flowOffset = (nowMs / 1000) * (flowSpeedPxPerSecond / scaleForLineWidth);
+        ctx.lineDashOffset = -flowOffset;
         ctx.stroke(path);
+        ctx.restore();
+
+        // Outline (thin border around the main stroke)
+        ctx.strokeStyle = SPELL_PATH_VISUALS.outlineColor;
+        ctx.lineWidth = (lineWidthPx + SPELL_PATH_VISUALS.outlineWidthPx * 2) / scaleForLineWidth;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.miterLimit = 2;
+        ctx.setLineDash([]);
+        ctx.stroke(path);
+
+        // Main line
+        ctx.strokeStyle = SPELL_PATH_VISUALS.lineColor;
+        ctx.lineWidth = lineWidthPx / scaleForLineWidth;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.miterLimit = 2;
+        ctx.stroke(path);
+
+        // Direction arrow for the active checkpoint (pulsing triangle)
+        const activeIdxRaw = debugInfo?.pathProgress ?? 0;
+        const activeIdx = Math.max(0, Math.min(targetSpell.waypoints.length - 1, activeIdxRaw));
+        const wFrom = targetSpell.waypoints[activeIdx];
+        const wTo = targetSpell.waypoints[activeIdx + 1];
+        if (wFrom) {
+          if (!indicatorRef.current) {
+            indicatorRef.current = { x: wFrom.x, y: wFrom.y, morphT: wTo ? 0 : 1 };
+          }
+
+          const followSpeed = 14;
+          const alpha = 1 - Math.exp(-followSpeed * dt);
+          indicatorRef.current.x = indicatorRef.current.x + (wFrom.x - indicatorRef.current.x) * alpha;
+          indicatorRef.current.y = indicatorRef.current.y + (wFrom.y - indicatorRef.current.y) * alpha;
+
+          const morphDurationSec = 0.28;
+          const morphStep = morphDurationSec > 0 ? (dt / morphDurationSec) : 1;
+          if (wTo) {
+            indicatorRef.current.morphT = Math.max(0, indicatorRef.current.morphT - morphStep);
+          } else {
+            indicatorRef.current.morphT = Math.min(1, indicatorRef.current.morphT + morphStep);
+          }
+
+          const pulse = 1 + SPELL_PATH_VISUALS.startArrowPulseAmplitude * Math.sin(2 * Math.PI * SPELL_PATH_VISUALS.startArrowPulseSpeedHz * (nowMs / 1000));
+          const arrowBaseSizePx = lineWidthPx * 3;
+          const size = (arrowBaseSizePx * pulse) / scaleForLineWidth;
+
+          const circlePulse = 1 + (SPELL_PATH_VISUALS.startArrowPulseAmplitude * 0.65) * Math.sin(2 * Math.PI * SPELL_PATH_VISUALS.startArrowPulseSpeedHz * (nowMs / 1000));
+          const circleRadius = ((lineWidthPx * 1.15) * circlePulse) / scaleForLineWidth;
+
+          const arrowAlpha = 1 - indicatorRef.current.morphT;
+          const circleAlpha = indicatorRef.current.morphT;
+
+          if (circleAlpha > 0.001) {
+            ctx.save();
+            ctx.globalAlpha = circleAlpha;
+            ctx.beginPath();
+            ctx.arc(indicatorRef.current.x, indicatorRef.current.y, circleRadius, 0, Math.PI * 2);
+            ctx.fillStyle = SPELL_PATH_VISUALS.startArrowColor;
+            ctx.fill();
+            ctx.lineWidth = 2 / scaleForLineWidth;
+            ctx.strokeStyle = SPELL_PATH_VISUALS.startArrowOutlineColor;
+            ctx.stroke();
+            ctx.restore();
+          }
+
+          if (wTo && arrowAlpha > 0.001) {
+            const dx = wTo.x - wFrom.x;
+            const dy = wTo.y - wFrom.y;
+            const len = Math.hypot(dx, dy);
+            const nx = len > 0 ? dx / len : 1;
+            const ny = len > 0 ? dy / len : 0;
+
+            const baseWidth = (size * 0.85);
+            const tipLen = (size * 1.15);
+
+            const tipX = indicatorRef.current.x + nx * (tipLen * 0.8);
+            const tipY = indicatorRef.current.y + ny * (tipLen * 0.8);
+            const baseX = indicatorRef.current.x - nx * (tipLen * 0.35);
+            const baseY = indicatorRef.current.y - ny * (tipLen * 0.35);
+
+            const px = -ny;
+            const py = nx;
+
+            const leftX = baseX + px * (baseWidth * 0.5);
+            const leftY = baseY + py * (baseWidth * 0.5);
+            const rightX = baseX - px * (baseWidth * 0.5);
+            const rightY = baseY - py * (baseWidth * 0.5);
+
+            ctx.save();
+            ctx.globalAlpha = arrowAlpha;
+            ctx.beginPath();
+            ctx.moveTo(tipX, tipY);
+            ctx.lineTo(leftX, leftY);
+            ctx.lineTo(rightX, rightY);
+            ctx.closePath();
+
+            ctx.fillStyle = SPELL_PATH_VISUALS.startArrowColor;
+            ctx.fill();
+
+            ctx.lineWidth = 2 / scaleForLineWidth;
+            ctx.strokeStyle = SPELL_PATH_VISUALS.startArrowOutlineColor;
+            ctx.stroke();
+            ctx.restore();
+          }
+        }
 
         // Draw Waypoints
         targetSpell.waypoints.forEach((wp, idx) => {
