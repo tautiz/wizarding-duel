@@ -105,7 +105,7 @@ export const TrackingOverlay: React.FC<TrackingOverlayProps> = ({ landmarks, tar
         ctx.miterLimit = 2;
         ctx.stroke(path);
 
-        // Direction arrow for the active checkpoint (pulsing triangle)
+        // Direction arrow for the active checkpoint (pulsing teardrop)
         const activeIdxRaw = debugInfo?.pathProgress ?? 0;
         const activeIdx = Math.max(0, Math.min(targetSpell.waypoints.length - 1, activeIdxRaw));
         const wFrom = targetSpell.waypoints[activeIdx];
@@ -130,66 +130,73 @@ export const TrackingOverlay: React.FC<TrackingOverlayProps> = ({ landmarks, tar
 
           const pulse = 1 + SPELL_PATH_VISUALS.startArrowPulseAmplitude * Math.sin(2 * Math.PI * SPELL_PATH_VISUALS.startArrowPulseSpeedHz * (nowMs / 1000));
           const arrowBaseSizePx = lineWidthPx * 3;
-          const size = (arrowBaseSizePx * pulse) / scaleForLineWidth;
+          const sizePx = arrowBaseSizePx * pulse;
 
           const circlePulse = 1 + (SPELL_PATH_VISUALS.startArrowPulseAmplitude * 0.65) * Math.sin(2 * Math.PI * SPELL_PATH_VISUALS.startArrowPulseSpeedHz * (nowMs / 1000));
-          const circleRadius = ((lineWidthPx * 1.15) * circlePulse) / scaleForLineWidth;
+          const circleRadiusPx = (lineWidthPx * 1.15) * circlePulse;
 
           const arrowAlpha = 1 - indicatorRef.current.morphT;
           const circleAlpha = indicatorRef.current.morphT;
+
+          // Draw in pixel-space to avoid distortion when scaleX != scaleY.
+          // IMPORTANT: at this point the context is still scaled (ctx.scale(scaleX, scaleY)),
+          // so we temporarily reset the transform to identity.
+          const indXpx = indicatorRef.current.x * scaleX;
+          const indYpx = indicatorRef.current.y * scaleY;
+
+          ctx.save();
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+          const drawTeardrop = (angleRad: number) => {
+            // Normalized size in px; keep proportions constant regardless of segment length
+            const r = sizePx * 0.45;
+            const tip = sizePx * 1.05;
+            const back = -sizePx * 0.55;
+            const ctrl = sizePx * 0.35;
+
+            ctx.save();
+            ctx.translate(indXpx, indYpx);
+            ctx.rotate(angleRad);
+            ctx.beginPath();
+            ctx.moveTo(tip, 0);
+            ctx.bezierCurveTo(ctrl, r, back, r, back, 0);
+            ctx.bezierCurveTo(back, -r, ctrl, -r, tip, 0);
+            ctx.closePath();
+
+            ctx.fillStyle = SPELL_PATH_VISUALS.startArrowColor;
+            ctx.fill();
+
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = SPELL_PATH_VISUALS.startArrowOutlineColor;
+            ctx.stroke();
+            ctx.restore();
+          };
 
           if (circleAlpha > 0.001) {
             ctx.save();
             ctx.globalAlpha = circleAlpha;
             ctx.beginPath();
-            ctx.arc(indicatorRef.current.x, indicatorRef.current.y, circleRadius, 0, Math.PI * 2);
+            ctx.arc(indXpx, indYpx, circleRadiusPx, 0, Math.PI * 2);
             ctx.fillStyle = SPELL_PATH_VISUALS.startArrowColor;
             ctx.fill();
-            ctx.lineWidth = 2 / scaleForLineWidth;
+            ctx.lineWidth = 2;
             ctx.strokeStyle = SPELL_PATH_VISUALS.startArrowOutlineColor;
             ctx.stroke();
             ctx.restore();
           }
 
           if (wTo && arrowAlpha > 0.001) {
-            const dx = wTo.x - wFrom.x;
-            const dy = wTo.y - wFrom.y;
-            const len = Math.hypot(dx, dy);
-            const nx = len > 0 ? dx / len : 1;
-            const ny = len > 0 ? dy / len : 0;
-
-            const baseWidth = (size * 0.85);
-            const tipLen = (size * 1.15);
-
-            const tipX = indicatorRef.current.x + nx * (tipLen * 0.8);
-            const tipY = indicatorRef.current.y + ny * (tipLen * 0.8);
-            const baseX = indicatorRef.current.x - nx * (tipLen * 0.35);
-            const baseY = indicatorRef.current.y - ny * (tipLen * 0.35);
-
-            const px = -ny;
-            const py = nx;
-
-            const leftX = baseX + px * (baseWidth * 0.5);
-            const leftY = baseY + py * (baseWidth * 0.5);
-            const rightX = baseX - px * (baseWidth * 0.5);
-            const rightY = baseY - py * (baseWidth * 0.5);
+            const dxPx = (wTo.x - wFrom.x) * scaleX;
+            const dyPx = (wTo.y - wFrom.y) * scaleY;
+            const angle = Math.atan2(dyPx, dxPx);
 
             ctx.save();
             ctx.globalAlpha = arrowAlpha;
-            ctx.beginPath();
-            ctx.moveTo(tipX, tipY);
-            ctx.lineTo(leftX, leftY);
-            ctx.lineTo(rightX, rightY);
-            ctx.closePath();
-
-            ctx.fillStyle = SPELL_PATH_VISUALS.startArrowColor;
-            ctx.fill();
-
-            ctx.lineWidth = 2 / scaleForLineWidth;
-            ctx.strokeStyle = SPELL_PATH_VISUALS.startArrowOutlineColor;
-            ctx.stroke();
+            drawTeardrop(angle);
             ctx.restore();
           }
+
+          ctx.restore();
         }
 
         // Draw Waypoints

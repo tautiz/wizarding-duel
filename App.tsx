@@ -59,6 +59,7 @@ const App: React.FC = () => {
   const [isPracticeMode, setIsPracticeMode] = useState(false);
   const [showPracticeOverlay, setShowPracticeOverlay] = useState(false);
   const [practiceSpellsCompleted, setPracticeSpellsCompleted] = useState(0);
+  const [spellTitleOverlay, setSpellTitleOverlay] = useState<{ name: string; phase: 'in' | 'out'; nonce: number } | null>(null);
 
   const activeSpell = spellQueue[activeQueueIndex];
   const tolerance = getToleranceForDifficulty(config.difficulty);
@@ -256,6 +257,36 @@ const App: React.FC = () => {
     currentTeamPlayerRef.current = currentTeamPlayer;
     teamTimeLeftRef.current = teamTimeLeft;
   }, [gameState, spellQueue, activeQueueIndex, pathProgress, isLevelSuccess, paused, config, timeLeft, teamSession, currentTeamPlayer, teamTimeLeft]);
+
+  useEffect(() => {
+    if (!activeSpell?.name) return;
+    if (
+      gameStateRef.current !== GameState.PLAYING &&
+      gameStateRef.current !== GameState.TEAM_PLAYING &&
+      gameStateRef.current !== GameState.TEAM_PRACTICE
+    ) {
+      return;
+    }
+
+    const nonce = Date.now();
+    setSpellTitleOverlay({ name: activeSpell.name, phase: 'in', nonce });
+
+    const fadeOutAtMs = 1800;
+    const hideAtMs = 2500;
+
+    const t1 = window.setTimeout(() => {
+      setSpellTitleOverlay(prev => (prev && prev.nonce === nonce ? { ...prev, phase: 'out' } : prev));
+    }, fadeOutAtMs);
+
+    const t2 = window.setTimeout(() => {
+      setSpellTitleOverlay(prev => (prev && prev.nonce === nonce ? null : prev));
+    }, hideAtMs);
+
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, [activeSpell?.id]);
 
   useEffect(() => {
     if (gameState !== GameState.PLAYING) setPaused(false);
@@ -1010,6 +1041,25 @@ const App: React.FC = () => {
     <div className={`min-h-screen bg-[#05050a] text-[#f4e4bc] relative flex flex-col items-center justify-center ${showSystemCursor ? 'cursor-auto' : 'cursor-none'} select-none overflow-hidden`}>
       <video ref={videoRef} className={`fixed inset-0 w-full h-full object-cover scale-x-[-1] transition-opacity duration-1000 ${gameState === GameState.PLAYING ? 'opacity-40' : 'opacity-20'}`} playsInline muted />
       <WandCursor x={cursorPos.x} y={cursorPos.y} isPinching={isPinching} />
+
+      {spellTitleOverlay && (
+        <div className="fixed inset-0 z-[9997] pointer-events-none flex items-center justify-center">
+          <div
+            className={`wizard-font text-center font-black uppercase tracking-widest drop-shadow-2xl transition-all duration-500 ${
+              spellTitleOverlay.phase === 'in'
+                ? 'opacity-100 scale-100'
+                : 'opacity-0 scale-[0.985]'
+            }`}
+            style={{
+              textShadow: '0 10px 40px rgba(0,0,0,0.65)',
+              fontSize: 'clamp(2.5rem, 6vw, 5rem)',
+              lineHeight: 1.05,
+            }}
+          >
+            {spellTitleOverlay.name}
+          </div>
+        </div>
+      )}
 
       {debugMode && (
         <div className="fixed bottom-6 left-6 z-[9998] pointer-events-auto select-text">
